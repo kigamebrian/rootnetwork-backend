@@ -1,4 +1,4 @@
-# blueprints/auth.py - FINAL VERSION
+# blueprints/auth.py - FINAL VERSION WITH SESSION FIX
 from flask import jsonify, request, session, make_response
 from models import User
 from exts import db, csrf
@@ -19,7 +19,7 @@ def get_allowed_origin():
     ]
     if origin in allowed_origins:
         return origin
-    return 'https://rootnetwork.netlify.app'  # Default
+    return 'https://rootnetwork.netlify.app'
 
 @auth_bp.route('/register', methods=['POST', 'OPTIONS'])
 @csrf.exempt
@@ -67,6 +67,9 @@ def register():
     db.session.add(user)
     db.session.commit()
     
+    # Clear any existing session
+    session.clear()
+    
     # Set session
     session.permanent = True
     session['user_id'] = user.id
@@ -74,10 +77,21 @@ def register():
     session['email'] = user.email
     session['is_super_admin'] = user.is_super_admin
     
-    return jsonify({'message': 'Registration successful', 'is_super_admin': user.is_super_admin,
-                    'user': {'id': user.id, 'email': user.email, 'username': user.username,
-                             'full_name': user.full_name, 'profile_image': user.profile_image,
-                             'is_super_admin': user.is_super_admin}}), 201
+    # Force session save
+    session.modified = True
+    
+    return jsonify({
+        'message': 'Registration successful',
+        'is_super_admin': user.is_super_admin,
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'full_name': user.full_name,
+            'profile_image': user.profile_image,
+            'is_super_admin': user.is_super_admin
+        }
+    }), 201
 
 @auth_bp.route('/check-auth', methods=['GET', 'OPTIONS'])
 @csrf.exempt
@@ -140,16 +154,23 @@ def login():
         user.last_login = datetime.now()
         db.session.commit()
         
+        # Clear existing session to avoid conflicts
+        session.clear()
+        
         # Set session - MAKE IT PERMANENT
-        session.permanent = True  # <--- ADD THIS LINE
+        session.permanent = True
         session['user_id'] = user.id
         session['username'] = user.username
         session['email'] = user.email
         session['is_super_admin'] = user.is_super_admin
         
+        # Force session save
+        session.modified = True
+        
         logger.log_login(user, success=True)
         
-        return jsonify({
+        # Create response
+        response = jsonify({
             'success': True,
             'user': {
                 'id': user.id,
@@ -162,6 +183,19 @@ def login():
                 'blog_subtitle': user.blog_subtitle
             }
         })
+        
+        # Explicitly set the session cookie with correct attributes
+        response.set_cookie(
+            'session',
+            value=session.sid if hasattr(session, 'sid') else '',
+            httponly=True,
+            samesite='None',      # Required for cross-origin
+            secure=True,           # Required with SameSite=None
+            path='/',
+            max_age=86400          # 24 hours
+        )
+        
+        return response
     
     ids.log_failed_attempt(identifier, ip_address, user_agent)
     return jsonify({'error': 'Invalid credentials'}), 401
@@ -193,7 +227,10 @@ def logout():
             logger.log_logout(user)
     
     session.clear()
-    return jsonify({'success': True})
+    # Also clear the cookie
+    response = make_response(jsonify({'success': True}))
+    response.set_cookie('session', '', expires=0, path='/')
+    return response
 
 @auth_bp.route('/admin-info', methods=['GET', 'OPTIONS'])
 @csrf.exempt
@@ -226,4 +263,17 @@ def admin_info():
         'name': 'Admin',
         'about': '',
         'is_super_admin': False
+    })
+
+@auth_bp.route('/debug/session', methods=['GET'])
+@csrf.exempt
+def debug_session():
+    """Debug endpoint to inspect session contents"""
+    return jsonify({
+        'session_keys': list(session.keys()),
+        'session_data': {k: str(v) for k, v in session.items()},
+        'has_user_id': 'user_id' in session,
+        'user_id': session.get('user_id'),
+        'username': session.get('username'),
+        'cookie_header': request.headers.get('Cookie', 'None')
     })
