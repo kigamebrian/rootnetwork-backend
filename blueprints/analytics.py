@@ -1,5 +1,5 @@
-# blueprints/analytics.py
-from flask import jsonify, request
+# blueprints/analytics.py - FINAL VERSION
+from flask import jsonify, request, make_response
 from models import PageView, UserAction, Post
 from exts import db, csrf
 from funcs import super_admin_required
@@ -7,12 +7,30 @@ from services.geo_service import get_country_code
 from . import analytics_bp
 from datetime import datetime, timedelta
 
+# ========== HELPER FUNCTION FOR CORS ==========
+def get_allowed_origin():
+    """Return the appropriate allowed origin based on request"""
+    origin = request.headers.get('Origin', '')
+    allowed_origins = [
+        'https://rootnetwork.netlify.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+    ]
+    if origin in allowed_origins:
+        return origin
+    return 'https://rootnetwork.netlify.app'  # Default
+
 @analytics_bp.route('/analytics', methods=['GET', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
 def get_analytics():
     if request.method == 'OPTIONS':
-        return '', 200
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
     
     days = request.args.get('days', 7, type=int)
     start_date = datetime.now() - timedelta(days=days)
@@ -62,16 +80,20 @@ def get_analytics():
 @super_admin_required
 def get_location_analytics():
     if request.method == 'OPTIONS':
-        return '', 200
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
     
     days = request.args.get('days', 30, type=int)
     start_date = datetime.now() - timedelta(days=days)
     
     try:
-        # FIXED: Added city to the query
         locations = db.session.query(
             PageView.country,
-            PageView.city,  # ADD THIS LINE
+            PageView.city,
             db.func.count(PageView.session_id.distinct()).label('visitor_count')
         ).filter(
             PageView.timestamp >= start_date
@@ -85,7 +107,7 @@ def get_location_analytics():
             PageView.country != 'Local'
         ).group_by(
             PageView.country,
-            PageView.city  # ADD THIS LINE - group by city too
+            PageView.city
         ).order_by(
             db.desc('visitor_count')
         ).limit(20).all()
@@ -127,7 +149,7 @@ def get_location_analytics():
         return jsonify({
             'visitor_locations': [{
                 'country': loc.country,
-                'city': loc.city or 'Unknown',  # ADD THIS - return city
+                'city': loc.city or 'Unknown',
                 'country_code': get_country_code(loc.country),
                 'visitor_count': loc.visitor_count
             } for loc in locations],
