@@ -8,6 +8,19 @@ from . import user_mgmt_bp
 from datetime import datetime
 from services import send_welcome_email_background
 
+# ========== HELPER FUNCTION FOR CORS ==========
+def get_allowed_origin():
+    """Return the appropriate allowed origin based on request"""
+    origin = request.headers.get('Origin', '')
+    allowed_origins = [
+        'https://rootnetwork.netlify.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+    ]
+    if origin in allowed_origins:
+        return origin
+    return 'https://rootnetwork.netlify.app'  # Default
+
 def track_action(action_type, action_details, target_id, target_type):
     """Helper function to track user actions"""
     try:
@@ -29,10 +42,18 @@ def track_action(action_type, action_details, target_id, target_type):
     except Exception as e:
         print(f"Failed to track action: {e}")
 
-@user_mgmt_bp.route('/users', methods=['GET'])
+@user_mgmt_bp.route('/users', methods=['GET', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
 def get_users():
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
+    
     users = User.query.all()
     return jsonify([{'id': u.id, 'email': u.email, 'username': u.username, 'full_name': u.full_name,
                      'profile_image': u.profile_image, 'is_super_admin': u.is_super_admin,
@@ -40,11 +61,19 @@ def get_users():
                      'last_login': u.last_login.isoformat() if u.last_login else None,
                      'post_count': u.posts.count()} for u in users])
 
-@user_mgmt_bp.route('/users', methods=['POST'])
+@user_mgmt_bp.route('/users', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
 @security_middleware
 def create_user():
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
+    
     try:
         data = request.json
         
@@ -107,7 +136,6 @@ def create_user():
         print(f"Error creating user: {e}")
         return jsonify({'error': str(e)}), 500
 
-# Combined PUT and OPTIONS in one route
 @user_mgmt_bp.route('/users/<int:user_id>', methods=['PUT', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
@@ -116,7 +144,7 @@ def update_user(user_id):
     # Handle OPTIONS request first
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'PUT, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -179,7 +207,6 @@ def update_user(user_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-# Combined DELETE and OPTIONS in one route
 @user_mgmt_bp.route('/users/<int:user_id>', methods=['DELETE', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
@@ -188,7 +215,7 @@ def delete_user(user_id):
     # Handle OPTIONS request first
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'DELETE, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
