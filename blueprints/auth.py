@@ -1,4 +1,4 @@
-# blueprints/auth.py - FINAL (NO MANUAL COOKIE)
+# blueprints/auth.py - FINAL (SYNTAX FIXED)
 from flask import jsonify, request, session, make_response
 from models import User
 from exts import db, csrf
@@ -32,8 +32,36 @@ def register():
         return response, 200
 
     data = request.json
-    # ... (validation and user creation as before) ...
-    user = User(...)
+    user_count = User.query.count()
+
+    email = data.get('email', '')[:120]
+    username = data.get('username', '')[:50]
+    full_name = data.get('full_name', '')[:100]
+    blog_title = data.get('blog_title', 'My Blog')[:120]
+    blog_subtitle = data.get('blog_subtitle', 'Welcome to my blog')[:200]
+    about = data.get('about', '')[:500]
+
+    username_valid, username_msg = validate_username(username)
+    if not username_valid:
+        return jsonify({'error': username_msg}), 400
+
+    password_valid, password_msg = validate_password_strength(data.get('password', ''))
+    if not password_valid:
+        return jsonify({'error': password_msg}), 400
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': 'Email already registered'}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'Username already taken'}), 400
+
+    user = User(
+        email=email, username=username, full_name=full_name,
+        is_super_admin=(user_count == 0), is_active=True,
+        blog_title=blog_title, blog_subtitle=blog_subtitle, about=about
+    )
+    user.set_password(data['password'])
+
     db.session.add(user)
     db.session.commit()
 
@@ -46,7 +74,18 @@ def register():
     session['is_super_admin'] = user.is_super_admin
     session.modified = True   # force save
 
-    return jsonify({'message': 'Registration successful', ...}), 201
+    return jsonify({
+        'message': 'Registration successful',
+        'is_super_admin': user.is_super_admin,
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'full_name': user.full_name,
+            'profile_image': user.profile_image,
+            'is_super_admin': user.is_super_admin
+        }
+    }), 201
 
 # ---------- CHECK-AUTH ----------
 @auth_bp.route('/check-auth', methods=['GET', 'OPTIONS'])
@@ -76,7 +115,7 @@ def check_auth():
             })
     return jsonify({'authenticated': False}), 401
 
-# ---------- LOGIN (CRITICAL FIX) ----------
+# ---------- LOGIN ----------
 @auth_bp.route('/login', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 @limiter.limit("10 per minute")
@@ -93,37 +132,45 @@ def login():
     identifier = data.get('identifier', '')
     password = data.get('password', '')
     user = User.query.filter_by(email=identifier).first() or User.query.filter_by(username=identifier).first()
-    if not user or not user.validate_password(password):
+
+    if not user:
+        ids.log_failed_attempt(identifier, request.headers.get('X-Forwarded-For', request.remote_addr), request.headers.get('User-Agent', ''))
         return jsonify({'error': 'Invalid credentials'}), 401
 
-    user.last_login = datetime.now()
-    db.session.commit()
+    if not user.is_active:
+        return jsonify({'error': 'Account is disabled'}), 401
 
-    # ---------- SESSION: ONLY THESE LINES ----------
-    session.clear()
-    session.permanent = True
-    session['user_id'] = user.id
-    session['username'] = user.username
-    session['email'] = user.email
-    session['is_super_admin'] = user.is_super_admin
-    session.modified = True   # <-- ensures the session is saved
-    # ---------- NO MANUAL COOKIE ----------
+    if user.validate_password(password):
+        user.last_login = datetime.now()
+        db.session.commit()
 
-    logger.log_login(user, success=True)
+        # SESSION: only these lines – NO manual cookie
+        session.clear()
+        session.permanent = True
+        session['user_id'] = user.id
+        session['username'] = user.username
+        session['email'] = user.email
+        session['is_super_admin'] = user.is_super_admin
+        session.modified = True
 
-    return jsonify({
-        'success': True,
-        'user': {
-            'id': user.id,
-            'email': user.email,
-            'username': user.username,
-            'full_name': user.full_name,
-            'profile_image': user.profile_image,
-            'is_super_admin': user.is_super_admin,
-            'blog_title': user.blog_title,
-            'blog_subtitle': user.blog_subtitle
-        }
-    })
+        logger.log_login(user, success=True)
+
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'username': user.username,
+                'full_name': user.full_name,
+                'profile_image': user.profile_image,
+                'is_super_admin': user.is_super_admin,
+                'blog_title': user.blog_title,
+                'blog_subtitle': user.blog_subtitle
+            }
+        })
+
+    ids.log_failed_attempt(identifier, request.headers.get('X-Forwarded-For', request.remote_addr), request.headers.get('User-Agent', ''))
+    return jsonify({'error': 'Invalid credentials'}), 401
 
 # ---------- CHECK REGISTRATION STATUS ----------
 @auth_bp.route('/check-registration-status', methods=['GET', 'OPTIONS'])
@@ -153,7 +200,6 @@ def logout():
             logger.log_logout(user)
 
     session.clear()
-    # No manual cookie clearing – Flask-Session will handle it.
     return jsonify({'success': True})
 
 # ---------- ADMIN INFO ----------
@@ -175,7 +221,7 @@ def admin_info():
                 'email': user.email,
                 'full_name': user.full_name,
                 'profile_image': user.profile_image,
-                'blog_title': user.blog_title or 'RootNetwork',
+                'blog_title': user.blog_title or 'My Blog',
                 'blog_subtitle': user.blog_subtitle or '',
                 'about': user.about or '',
                 'is_super_admin': user.is_super_admin
