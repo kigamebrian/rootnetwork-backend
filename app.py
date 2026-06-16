@@ -45,26 +45,39 @@ with app.app_context():
     else:
         print("⚠️ WAF system initialization failed - continuing without WAF")
 
-# ========== CRITICAL: OPTIONS HANDLER MUST BE FIRST ==========
-# This catches ALL OPTIONS requests before they reach any blueprint
-@app.before_request
-def handle_preflight():
-    if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", "http://localhost:3000")
-        response.headers.add("Access-Control-Allow-Credentials", "true")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRFToken, X-Requested-With, Accept")
-        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-        response.headers.add("Access-Control-Max-Age", "86400")
-        return response, 200
+# ========== SINGLE CORS CONFIGURATION (NO DUPLICATES) ==========
+# REMOVED duplicate CORS and @app.before_request handlers
+# Let Flask-CORS handle OPTIONS automatically
 
-# CORS configuration
-CORS(app, 
-     supports_credentials=True, 
-     origins=['http://localhost:3000', 'http://127.0.0.1:3000'],
-     allow_headers=['Content-Type', 'Authorization', 'X-CSRFToken', 'X-Requested-With', 'Accept'],
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-     expose_headers=['Content-Type', 'X-CSRFToken'])
+# Define allowed origins
+ALLOWED_ORIGINS = [
+    "https://rootnetwork.netlify.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+
+# Single CORS configuration
+CORS(
+    app,
+    supports_credentials=True,
+    origins=ALLOWED_ORIGINS,
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-CSRFToken",
+        "X-Requested-With",
+        "Accept"
+    ],
+    methods=[
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "OPTIONS",
+        "PATCH"
+    ],
+    expose_headers=["Content-Type", "X-CSRFToken"]
+)
 
 # Import and register blueprints
 from blueprints import (
@@ -110,29 +123,6 @@ def waf_status():
         'redis_available': app.config.get('WAF_ENABLED', False),
         'version': '1.0.0'
     })
-CORS(app, 
-     supports_credentials=True, 
-     origins=CORS_ORIGINS,
-     allow_headers=['Content-Type', 'Authorization', 'X-CSRFToken', 'X-Requested-With', 'Accept'],
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-     expose_headers=['Content-Type', 'X-CSRFToken'])
-
-# ========== OPTIONS HANDLER ==========
-@app.before_request
-def handle_preflight():
-    if request.method == 'OPTIONS':
-        response = make_response()
-        origin = request.headers.get('Origin')
-        if origin in CORS_ORIGINS or origin == 'https://rootnetwork.netlify.app':
-            response.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            # Allow the specific origin anyway
-            response.headers.add("Access-Control-Allow-Origin", "https://rootnetwork.netlify.app")
-        response.headers.add("Access-Control-Allow-Credentials", "true")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRFToken, X-Requested-With, Accept")
-        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-        response.headers.add("Access-Control-Max-Age", "86400")
-        return response, 200
 
 # ========== ERROR HANDLERS ==========
 @app.errorhandler(429)
@@ -160,6 +150,7 @@ with app.app_context():
 # ========== SCHEDULER ==========
 from services.scheduler import start_scheduler
 start_scheduler(app)
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
