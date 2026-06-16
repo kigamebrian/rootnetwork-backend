@@ -1,0 +1,40 @@
+# backend/.gitignore
+
+# Environment variables
+.env
+
+# Python
+*.pyc
+__pycache__/
+
+# Virtual environment
+venv/
+env/
+
+# Database
+*.sqlite3
+*.db
+instance/
+
+# Session files
+flask_session/
+.session/
+
+# Uploads and cache
+static/uploads/
+static/posts/
+static/profiles/
+audio_cache/
+temp/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Flask
+migrations/__pycache__/
+*.pyc

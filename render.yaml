@@ -1,0 +1,16 @@
+# backend/render.yaml
+services:
+  - type: web
+    name: rootnetwork-backend
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SESSION_COOKIE_SECURE
+        value: true
+      - key: PYTHON_VERSION
+        value: 3.11.0
