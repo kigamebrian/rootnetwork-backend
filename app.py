@@ -14,6 +14,7 @@ import os
 from funcs import create_app, init_limiter
 from blueprints.waf_admin import waf_admin_bp
 from init_waf import init_waf
+from config import CORS_ORIGINS
 
 load_dotenv()
 
@@ -109,6 +110,29 @@ def waf_status():
         'redis_available': app.config.get('WAF_ENABLED', False),
         'version': '1.0.0'
     })
+CORS(app, 
+     supports_credentials=True, 
+     origins=CORS_ORIGINS,
+     allow_headers=['Content-Type', 'Authorization', 'X-CSRFToken', 'X-Requested-With', 'Accept'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+     expose_headers=['Content-Type', 'X-CSRFToken'])
+
+# ========== OPTIONS HANDLER ==========
+@app.before_request
+def handle_preflight():
+    if request.method == 'OPTIONS':
+        response = make_response()
+        origin = request.headers.get('Origin')
+        if origin in CORS_ORIGINS or origin == 'https://rootnetwork.netlify.app':
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            # Allow the specific origin anyway
+            response.headers.add("Access-Control-Allow-Origin", "https://rootnetwork.netlify.app")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRFToken, X-Requested-With, Accept")
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+        response.headers.add("Access-Control-Max-Age", "86400")
+        return response, 200
 
 # ========== ERROR HANDLERS ==========
 @app.errorhandler(429)
