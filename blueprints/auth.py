@@ -8,8 +8,18 @@ from services.logging_service import logger
 from . import auth_bp
 from datetime import datetime
 
-# REMOVE this line - don't create a new limiter
-# limiter = Limiter(get_remote_address, default_limits=["200 per day", "50 per hour"])
+# ========== HELPER FUNCTION FOR CORS ==========
+def get_allowed_origin():
+    """Return the appropriate allowed origin based on request"""
+    origin = request.headers.get('Origin', '')
+    allowed_origins = [
+        'https://rootnetwork.netlify.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+    ]
+    if origin in allowed_origins:
+        return origin
+    return 'https://rootnetwork.netlify.app'  # Default
 
 @auth_bp.route('/register', methods=['POST', 'OPTIONS'])
 @csrf.exempt
@@ -17,7 +27,7 @@ from datetime import datetime
 def register():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -72,7 +82,7 @@ def register():
 def check_auth():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response, 200
     
@@ -91,7 +101,7 @@ def check_auth():
 def login():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -138,7 +148,7 @@ def login():
 def check_registration_status():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response, 200
     
@@ -150,7 +160,7 @@ def check_registration_status():
 def logout():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response, 200
     
@@ -167,7 +177,7 @@ def logout():
 def admin_info():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response, 200
     
