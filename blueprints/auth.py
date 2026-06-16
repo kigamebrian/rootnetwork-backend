@@ -175,7 +175,7 @@ def admin_info():
                 'email': user.email,
                 'full_name': user.full_name,
                 'profile_image': user.profile_image,
-                'blog_title': user.blog_title or 'My Blog',
+                'blog_title': user.blog_title or 'RootNetwork',
                 'blog_subtitle': user.blog_subtitle or '',
                 'about': user.about or '',
                 'is_super_admin': user.is_super_admin
