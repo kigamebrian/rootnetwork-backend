@@ -1,6 +1,6 @@
-# app.py
+# app.py - FINAL VERSION
 from dotenv import load_dotenv
-from flask import send_from_directory, jsonify, make_response, request
+from flask import send_from_directory, jsonify, make_response, request, session
 from flask_cors import CORS
 from flask_session import Session
 from blueprints import (
@@ -20,20 +20,33 @@ load_dotenv()
 
 app = create_app()
 migrate.init_app(app, db)
+
+# ========== SECRET KEY ==========
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
+
+# ========== SESSION CONFIGURATION - FIXED FOR PERSISTENCE ==========
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_PERMANENT'] = True  # Make sessions permanent
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'True').lower() == 'true'
+app.config['SESSION_COOKIE_PATH'] = '/'
+app.config['SESSION_REFRESH_EACH_REQUEST'] = True  # Keep session alive
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 hours in seconds
+app.config['SESSION_COOKIE_DOMAIN'] = None  # Let browser handle it
+
+Session(app)
 
 # Initialize limiter with app
 init_limiter(app)
 
-# Session configuration
-app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_USE_SIGNER'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() == 'true'
-
-Session(app)
+# ========== SESSION KEEP-ALIVE MIDDLEWARE ==========
+@app.before_request
+def refresh_session():
+    """Refresh session on each request to prevent timeout"""
+    if 'user_id' in session:
+        session.modified = True
 
 # ========== WAF INITIALIZATION ==========
 with app.app_context():
@@ -45,18 +58,13 @@ with app.app_context():
     else:
         print("⚠️ WAF system initialization failed - continuing without WAF")
 
-# ========== SINGLE CORS CONFIGURATION (NO DUPLICATES) ==========
-# REMOVED duplicate CORS and @app.before_request handlers
-# Let Flask-CORS handle OPTIONS automatically
-
-# Define allowed origins
+# ========== CORS CONFIGURATION ==========
 ALLOWED_ORIGINS = [
     "https://rootnetwork.netlify.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
 ]
 
-# Single CORS configuration
 CORS(
     app,
     supports_credentials=True,
@@ -78,7 +86,6 @@ CORS(
     ],
     expose_headers=["Content-Type", "X-CSRFToken"]
 )
-# app.py - Add this after CORS configuration
 
 # ========== GLOBAL CORS HANDLER (OVERRIDES BLUEPRINT HEADERS) ==========
 @app.after_request
@@ -91,7 +98,6 @@ def add_cors_headers(response):
         'http://127.0.0.1:3000'
     ]
     
-    # Allow the requesting origin if it's in our list
     if origin in allowed_origins:
         response.headers['Access-Control-Allow-Origin'] = origin
     else:
@@ -103,15 +109,16 @@ def add_cors_headers(response):
     response.headers['Access-Control-Expose-Headers'] = 'Content-Type, X-CSRFToken'
     
     return response
-# Import and register blueprints
+
+# ========== IMPORT AND REGISTER BLUEPRINTS ==========
 from blueprints import (
     rate_limit_bp, tts_bp 
 )
 
-# Register WAF admin blueprint FIRST (before other admin routes)
+# Register WAF admin blueprint FIRST
 app.register_blueprint(waf_admin_bp)
 
-# Register other blueprints
+# Register all other blueprints
 app.register_blueprint(auth_bp)
 app.register_blueprint(tracking_bp)
 app.register_blueprint(upload_bp)
@@ -128,12 +135,11 @@ app.register_blueprint(trending_bp)
 app.register_blueprint(rate_limit_bp)
 app.register_blueprint(tts_bp)
 
-# Static files
+# ========== STATIC FILES ==========
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
 
-# Route for audio cache
 @app.route('/audio_cache/<path:filename>')
 def serve_audio_cache(filename):
     return send_from_directory('audio_cache', filename, mimetype='audio/mpeg')
@@ -175,6 +181,7 @@ with app.app_context():
 from services.scheduler import start_scheduler
 start_scheduler(app)
 
+# ========== RUN APP ==========
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
