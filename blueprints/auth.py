@@ -1,4 +1,4 @@
-# blueprints/auth.py
+# blueprints/auth.py - FINAL VERSION
 from flask import jsonify, request, session, make_response
 from models import User
 from exts import db, csrf
@@ -67,6 +67,8 @@ def register():
     db.session.add(user)
     db.session.commit()
     
+    # Set session
+    session.permanent = True
     session['user_id'] = user.id
     session['username'] = user.username
     session['email'] = user.email
@@ -89,10 +91,20 @@ def check_auth():
     if 'user_id' in session:
         user = User.query.get(session['user_id'])
         if user:
-            return jsonify({'authenticated': True, 'username': user.username,
-                            'user': {'id': user.id, 'email': user.email, 'username': user.username,
-                                     'full_name': user.full_name, 'profile_image': user.profile_image,
-                                     'is_super_admin': user.is_super_admin}})
+            # Refresh session
+            session.modified = True
+            return jsonify({
+                'authenticated': True,
+                'username': user.username,
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'username': user.username,
+                    'full_name': user.full_name,
+                    'profile_image': user.profile_image,
+                    'is_super_admin': user.is_super_admin
+                }
+            })
     return jsonify({'authenticated': False}), 401
 
 @auth_bp.route('/login', methods=['POST', 'OPTIONS'])
@@ -128,6 +140,8 @@ def login():
         user.last_login = datetime.now()
         db.session.commit()
         
+        # Set session - MAKE IT PERMANENT
+        session.permanent = True  # <--- ADD THIS LINE
         session['user_id'] = user.id
         session['username'] = user.username
         session['email'] = user.email
@@ -135,10 +149,19 @@ def login():
         
         logger.log_login(user, success=True)
         
-        return jsonify({'success': True, 'user': {'id': user.id, 'email': user.email, 'username': user.username,
-                                                   'full_name': user.full_name, 'profile_image': user.profile_image,
-                                                   'is_super_admin': user.is_super_admin,
-                                                   'blog_title': user.blog_title, 'blog_subtitle': user.blog_subtitle}})
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'username': user.username,
+                'full_name': user.full_name,
+                'profile_image': user.profile_image,
+                'is_super_admin': user.is_super_admin,
+                'blog_title': user.blog_title,
+                'blog_subtitle': user.blog_subtitle
+            }
+        })
     
     ids.log_failed_attempt(identifier, ip_address, user_agent)
     return jsonify({'error': 'Invalid credentials'}), 401
