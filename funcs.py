@@ -1,7 +1,7 @@
 # funcs.py
 from dotenv import load_dotenv
 from functools import wraps
-from flask import session, jsonify, g, request
+from flask import session, jsonify, g, request, make_response   # <-- added make_response
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from models import User, generate_slug
@@ -130,15 +130,19 @@ def validate_and_sanitize_image(file_path):
         return False, f"Invalid image: {str(e)}", 0, 0
 
 # ================= IMPROVED DECORATORS =================
+# CRITICAL FIX: Allow OPTIONS requests to bypass authentication
 
 def login_required(f):
     """Decorator to require login for routes - sets g.current_user"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # OPTIONS preflight – return 200 without authentication
+        if request.method == 'OPTIONS':
+            return make_response(), 200
+        
         if 'user_id' not in session:
             return jsonify({'error': 'Login required'}), 401
         
-        # Set current user in Flask's g object
         user = User.query.get(session['user_id'])
         if not user or not user.is_active:
             session.clear()
@@ -152,6 +156,10 @@ def super_admin_required(f):
     """Decorator to require super admin access - sets g.current_user"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # OPTIONS preflight – return 200 without authentication
+        if request.method == 'OPTIONS':
+            return make_response(), 200
+        
         if 'user_id' not in session:
             return jsonify({'error': 'Login required'}), 401
         
