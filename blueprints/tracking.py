@@ -1,4 +1,4 @@
-# blueprints/tracking.py - Updated with fixes
+# blueprints/tracking.py - Fixed CORS
 from flask import jsonify, request, session, make_response
 from models import PageView, UserAction
 from exts import db, csrf
@@ -7,12 +7,25 @@ from services.geo_service import get_geolocation, get_cache_stats
 from . import tracking_bp
 from datetime import datetime
 
+# ========== HELPER FUNCTION FOR CORS ==========
+def get_allowed_origin():
+    """Return the appropriate allowed origin based on request"""
+    origin = request.headers.get('Origin', '')
+    allowed_origins = [
+        'https://rootnetwork.netlify.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+    ]
+    if origin in allowed_origins:
+        return origin
+    return 'https://rootnetwork.netlify.app'  # Default
+
 @tracking_bp.route('/page-view', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 def track_page_view():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -24,7 +37,7 @@ def track_page_view():
         user_id = session.get('user_id')
         user_agent = request.headers.get('User-Agent', '')
         
-        # FIXED: Extract the first IP from X-Forwarded-For
+        # Extract the first IP from X-Forwarded-For
         forwarded = request.headers.get('X-Forwarded-For')
         if forwarded:
             ip_address = forwarded.split(',')[0].strip()
@@ -59,7 +72,7 @@ def track_page_view():
 def track_user_action():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -89,9 +102,17 @@ def track_user_action():
 
 # ========== DEBUG ENDPOINTS ==========
 
-@tracking_bp.route('/debug/geo', methods=['GET'])
+@tracking_bp.route('/debug/geo', methods=['GET', 'OPTIONS'])
 @csrf.exempt
 def debug_geo():
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
+    
     """Debug endpoint to test geolocation"""
     from services.geo_service import get_geolocation, is_private_ip, get_public_ip, get_cache_stats
     
@@ -128,9 +149,17 @@ def debug_geo():
         'cache_keys': cache_stats.get('cache_keys', [])
     }), 200
 
-@tracking_bp.route('/debug/recent', methods=['GET'])
+@tracking_bp.route('/debug/recent', methods=['GET', 'OPTIONS'])
 @csrf.exempt
 def debug_recent():
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
+    
     """Debug endpoint to see recent page views"""
     recent = PageView.query.order_by(PageView.id.desc()).limit(20).all()
     
