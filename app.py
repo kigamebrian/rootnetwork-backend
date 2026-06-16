@@ -78,7 +78,31 @@ CORS(
     ],
     expose_headers=["Content-Type", "X-CSRFToken"]
 )
+# app.py - Add this after CORS configuration
 
+# ========== GLOBAL CORS HANDLER (OVERRIDES BLUEPRINT HEADERS) ==========
+@app.after_request
+def add_cors_headers(response):
+    """Add CORS headers to every response, overriding blueprint-level headers"""
+    origin = request.headers.get('Origin', '')
+    allowed_origins = [
+        'https://rootnetwork.netlify.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+    ]
+    
+    # Allow the requesting origin if it's in our list
+    if origin in allowed_origins:
+        response.headers['Access-Control-Allow-Origin'] = origin
+    else:
+        response.headers['Access-Control-Allow-Origin'] = 'https://rootnetwork.netlify.app'
+    
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken, X-Requested-With, Accept'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+    response.headers['Access-Control-Expose-Headers'] = 'Content-Type, X-CSRFToken'
+    
+    return response
 # Import and register blueprints
 from blueprints import (
     rate_limit_bp, tts_bp 
