@@ -12,13 +12,13 @@ def get_allowed_origin():
     """Return the appropriate allowed origin based on request"""
     origin = request.headers.get('Origin', '')
     allowed_origins = [
-        'https://rootnetwork.netlify.app',
+        'https://rootnetwork1.netlify.app',
         'http://localhost:3000',
         'http://127.0.0.1:3000'
     ]
     if origin in allowed_origins:
         return origin
-    return 'https://rootnetwork.netlify.app'  # Default
+    return 'https://rootnetwork1.netlify.app'  # Default
 
 @tracking_bp.route('/page-view', methods=['POST', 'OPTIONS'])
 @csrf.exempt
