@@ -1,4 +1,4 @@
-# blueprints/user_mgmt.py - FINAL (with 500 error fix)
+# blueprints/user_mgmt.py - FINAL (with security logging)
 from flask import jsonify, request, session, make_response
 from models import User
 from exts import db, csrf
@@ -7,6 +7,7 @@ from middleware.security_middleware import security_middleware
 from . import user_mgmt_bp
 from datetime import datetime
 from services import send_welcome_email_background
+from services.logging_service import logger   # <-- ADDED for security logging
 
 # ========== HELPER FUNCTION FOR CORS ==========
 def get_allowed_origin():
@@ -18,6 +19,7 @@ def get_allowed_origin():
     ]
     return origin if origin in allowed_origins else 'https://rootnetwork1.netlify.app'
 
+# ========== ANALYTICS TRACKING (optional) ==========
 def track_action(action_type, action_details, target_id, target_type):
     try:
         from models import UserAction
@@ -46,7 +48,6 @@ def get_users():
         users = User.query.all()
         result = []
         for u in users:
-            # Safely get post count – check if relationship exists
             if hasattr(u, 'posts'):
                 post_count = u.posts.count()
             else:
@@ -113,6 +114,7 @@ def create_user():
         db.session.add(user)
         db.session.commit()
 
+        # --- Send welcome email ---
         send_welcome_email_background(
             email=user.email,
             name=user.full_name,
@@ -120,12 +122,26 @@ def create_user():
             password=data['password']
         )
 
+        # --- ANALYTICS tracking ---
         track_action(
             action_type='create_user',
             action_details=f'Created user: {user.username} (Role: {"Admin" if user.is_super_admin else "User"})',
             target_id=user.id,
             target_type='user'
         )
+
+        # --- SECURITY LOGGING: record in ActivityLog ---
+        admin_user = User.query.get(session.get('user_id'))
+        if admin_user:
+            logger.log_activity(
+                user_id=admin_user.id,
+                username=admin_user.username,
+                action='create_user',
+                action_details=f'Created user: {user.username} (Role: {"Admin" if user.is_super_admin else "User"})',
+                endpoint='/api/admin/users',
+                method='POST',
+                status=201
+            )
 
         return jsonify({'message': 'User created successfully. Welcome email sent.', 'id': user.id}), 201
 
@@ -184,12 +200,26 @@ def update_user(user_id):
         db.session.commit()
 
         if changes:
+            # --- ANALYTICS tracking ---
             track_action(
                 action_type='update_user',
                 action_details=f'Updated user {user.username}: {", ".join(changes)}',
                 target_id=user_id,
                 target_type='user'
             )
+
+            # --- SECURITY LOGGING ---
+            admin_user = User.query.get(session.get('user_id'))
+            if admin_user:
+                logger.log_activity(
+                    user_id=admin_user.id,
+                    username=admin_user.username,
+                    action='update_user',
+                    action_details=f'Updated user {user.username}: {", ".join(changes)}',
+                    endpoint=f'/api/admin/users/{user_id}',
+                    method='PUT',
+                    status=200
+                )
 
         return jsonify({'message': 'User updated successfully'})
     except Exception as e:
@@ -212,12 +242,26 @@ def delete_user(user_id):
         db.session.delete(user)
         db.session.commit()
 
+        # --- ANALYTICS tracking ---
         track_action(
             action_type='delete_user',
             action_details=f'Deleted user: {username}',
             target_id=user_id,
             target_type='user'
         )
+
+        # --- SECURITY LOGGING ---
+        admin_user = User.query.get(session.get('user_id'))
+        if admin_user:
+            logger.log_activity(
+                user_id=admin_user.id,
+                username=admin_user.username,
+                action='delete_user',
+                action_details=f'Deleted user: {username}',
+                endpoint=f'/api/admin/users/{user_id}',
+                method='DELETE',
+                status=200
+            )
 
         return jsonify({'message': 'User deleted successfully'})
     except Exception as e:
