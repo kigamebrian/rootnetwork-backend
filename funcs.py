@@ -1,7 +1,7 @@
-# funcs.py
+# funcs.py - FINAL (with SQLALCHEMY_ENGINE_OPTIONS)
 from dotenv import load_dotenv
 from functools import wraps
-from flask import session, jsonify, g, request, make_response   # <-- added make_response
+from flask import session, jsonify, g, request, make_response
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from models import User, generate_slug
@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# ================= EXISTING FUNCTIONS =================
+# ================= APP FACTORY =================
 
 def create_app():
-    """App factory function - your existing implementation"""
+    """App factory function - with database engine options for production"""
     from flask import Flask
     from exts import db, csrf, mail, ckeditor, loginmanager
     import os
@@ -35,6 +35,15 @@ def create_app():
     
     # Load config
     app.config.from_pyfile('config.py', silent=True)
+    
+    # ===== FIX: Database engine options (prevents SSL errors in scheduler) =====
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,      # Check connection before using
+        'pool_recycle': 300,        # Recycle connections after 5 minutes
+        'pool_size': 10,            # Connection pool size
+        'max_overflow': 20          # Extra connections allowed
+    }
+    # =========================================================================
     
     # Initialize extensions
     db.init_app(app)
@@ -48,7 +57,7 @@ def create_app():
 # Create limiter instance (will be initialized with app later)
 limiter = Limiter(
     get_remote_address,
-    default_limits=["1000 per day", "200 per hour", "30 per minute"],  # Increased
+    default_limits=["1000 per day", "200 per hour", "30 per minute"],
     storage_uri="memory://"
 )
 
@@ -129,51 +138,40 @@ def validate_and_sanitize_image(file_path):
     except Exception as e:
         return False, f"Invalid image: {str(e)}", 0, 0
 
-# ================= IMPROVED DECORATORS =================
-# CRITICAL FIX: Allow OPTIONS requests to bypass authentication
+# ================= DECORATORS =================
 
 def login_required(f):
-    """Decorator to require login for routes - sets g.current_user"""
+    """Decorator to require login - sets g.current_user; allows OPTIONS"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # OPTIONS preflight – return 200 without authentication
         if request.method == 'OPTIONS':
             return make_response(), 200
-        
         if 'user_id' not in session:
             return jsonify({'error': 'Login required'}), 401
-        
         user = User.query.get(session['user_id'])
         if not user or not user.is_active:
             session.clear()
             return jsonify({'error': 'Invalid session'}), 401
-        
         g.current_user = user
         return f(*args, **kwargs)
     return decorated_function
 
 def super_admin_required(f):
-    """Decorator to require super admin access - sets g.current_user"""
+    """Decorator to require super admin access - allows OPTIONS"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # OPTIONS preflight – return 200 without authentication
         if request.method == 'OPTIONS':
             return make_response(), 200
-        
         if 'user_id' not in session:
             return jsonify({'error': 'Login required'}), 401
-        
         user = User.query.get(session['user_id'])
         if not user:
             session.clear()
             return jsonify({'error': 'Invalid session'}), 401
-        
         if not user.is_active:
             return jsonify({'error': 'Account disabled'}), 403
-        
         if not user.is_super_admin:
             return jsonify({'error': 'Super admin access required'}), 403
-        
         g.current_user = user
         return f(*args, **kwargs)
     return decorated_function
@@ -187,17 +185,14 @@ def get_session_id():
         session['tracking_session_id'] = session_id
     return session_id
 
-# ================= NEW HELPER FUNCTIONS =================
+# ================= HELPER FUNCTIONS =================
 
 def validate_email_address(email):
-    """Validate email using proper library (fallback if email-validator not installed)"""
-    # Basic validation - consider installing email-validator
     if '@' not in email or '.' not in email.split('@')[-1]:
         return None, "Invalid email format"
     return email, None
 
 def validate_boolean(value, field_name):
-    """Strict boolean validation accepting various formats"""
     if isinstance(value, bool):
         return value, None
     if isinstance(value, str):
@@ -210,41 +205,33 @@ def validate_boolean(value, field_name):
     return None, f"{field_name} must be a boolean"
 
 def safe_get_json(allowed_fields=None, required_fields=None):
-    """Safely get JSON from request with field validation"""
     data = request.get_json(silent=True)
     if data is None:
         return None, "Invalid JSON"
-    
     if not isinstance(data, dict):
         return None, "JSON body must be an object"
-    
     if allowed_fields:
         unknown = set(data.keys()) - allowed_fields
         if unknown:
             return None, f"Unknown fields: {', '.join(unknown)}"
-    
     if required_fields:
         missing = [f for f in required_fields if f not in data]
         if missing:
             return None, f"Missing required fields: {', '.join(missing)}"
-    
     return data, None
 
 def handle_db_error():
-    """Consistent database error handler"""
     from exts import db
     db.session.rollback()
     logger.exception("Database error occurred")
     return jsonify({'error': 'Internal server error'}), 500
 
 def validate_pagination(page, per_page, default_per_page=20):
-    """Validate pagination parameters"""
     page = max(1, page if page else 1)
     per_page = min(max(1, per_page if per_page else default_per_page), 100)
     return page, per_page
 
 def format_datetime(dt):
-    """Format datetime safely with timezone"""
     if not dt:
         return None
     if dt.tzinfo:
@@ -252,7 +239,6 @@ def format_datetime(dt):
     return dt.isoformat()
 
 def log_audit(action, actor_id, target_id=None, details=None, request_info=None):
-    """Structured audit logging with JSON format"""
     log_entry = {
         "event": "audit",
         "action": action,
@@ -270,10 +256,8 @@ def log_audit(action, actor_id, target_id=None, details=None, request_info=None)
 # ================= CLI COMMANDS =================
 
 def register_commands(app):
-    """Register CLI commands"""
     @app.cli.command("create-admin")
     def create_admin():
-        """Create admin user"""
         from models import User
         import getpass
         from exts import db
@@ -300,7 +284,6 @@ def register_commands(app):
         print(f"✅ Admin user {username} created successfully")
 
 def register_tFilter(app):
-    """Register template filters"""
     @app.template_filter('datetimeformat')
     def datetimeformat(value, format='%Y-%m-%d %H:%M'):
         if value:
