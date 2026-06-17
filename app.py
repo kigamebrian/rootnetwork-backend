@@ -1,4 +1,4 @@
-# app.py - FINAL VERSION
+# app.py - FINAL VERSION (with Cloudinary)
 from dotenv import load_dotenv
 from flask import send_from_directory, jsonify, make_response, request, session
 from flask_cors import CORS
@@ -15,8 +15,12 @@ from funcs import create_app, init_limiter
 from blueprints.waf_admin import waf_admin_bp
 from init_waf import init_waf
 from config import CORS_ORIGINS
+import cloudinary   # <-- ADDED
 
 load_dotenv()
+
+# ========== CLOUDINARY INITIALIZATION ==========
+cloudinary.config(secure=True)   # reads from CLOUDINARY_URL env var
 
 app = create_app()
 migrate.init_app(app, db)
@@ -24,27 +28,26 @@ migrate.init_app(app, db)
 # ========== SECRET KEY ==========
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
 
-# ========== SESSION CONFIGURATION - FIXED FOR PERSISTENCE ==========
+# ========== SESSION CONFIGURATION ==========
 app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_PERMANENT'] = True  # Make sessions permanent
+app.config['SESSION_PERMANENT'] = True
 app.config['SESSION_USE_SIGNER'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'True').lower() == 'true'
 app.config['SESSION_COOKIE_PATH'] = '/'
-app.config['SESSION_REFRESH_EACH_REQUEST'] = True  # Keep session alive
-app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 hours in seconds
-app.config['SESSION_COOKIE_DOMAIN'] = None  # Let browser handle it
+app.config['SESSION_REFRESH_EACH_REQUEST'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400
+app.config['SESSION_COOKIE_DOMAIN'] = None
 
 Session(app)
 
-# Initialize limiter with app
+# Initialize limiter
 init_limiter(app)
 
-# ========== SESSION KEEP-ALIVE MIDDLEWARE ==========
+# ========== SESSION KEEP-ALIVE ==========
 @app.before_request
 def refresh_session():
-    """Refresh session on each request to prevent timeout"""
     if 'user_id' in session:
         session.modified = True
 
@@ -52,18 +55,10 @@ def refresh_session():
 with app.app_context():
     waf_initialized = init_waf()
     app.config['WAF_ENABLED'] = waf_initialized
-    
-    if waf_initialized:
-        print("🛡️ WAF system initialized and ready")
-    else:
-        print("⚠️ WAF system initialization failed - continuing without WAF")
+    print(f"🛡️ WAF initialized: {waf_initialized}")
 
-# ========== CORS CONFIGURATION ==========
-ALLOWED_ORIGINS = [
-    "https://rootnetwork1.netlify.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000"
-]
+# ========== CORS CONFIGURATION (using config) ==========
+ALLOWED_ORIGINS = CORS_ORIGINS   # Use the list from config.py
 
 CORS(
     app,
@@ -87,38 +82,27 @@ CORS(
     expose_headers=["Content-Type", "X-CSRFToken"]
 )
 
-# ========== GLOBAL CORS HANDLER (OVERRIDES BLUEPRINT HEADERS) ==========
+# ========== GLOBAL CORS HANDLER ==========
 @app.after_request
 def add_cors_headers(response):
-    """Add CORS headers to every response, overriding blueprint-level headers"""
     origin = request.headers.get('Origin', '')
-    allowed_origins = [
-        'https://rootnetwork1.netlify.app',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000'
-    ]
-    
-    if origin in allowed_origins:
+    # Allow if origin is in the list, otherwise fallback to the first allowed origin
+    if origin in ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin'] = origin
     else:
-        response.headers['Access-Control-Allow-Origin'] = 'https://rootnetwork1.netlify.app'
-    
+        response.headers['Access-Control-Allow-Origin'] = ALLOWED_ORIGINS[0]  # or 'https://rootnetwork1.netlify.app'
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken, X-Requested-With, Accept'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
     response.headers['Access-Control-Expose-Headers'] = 'Content-Type, X-CSRFToken'
-    
     return response
 
-# ========== IMPORT AND REGISTER BLUEPRINTS ==========
+# ========== REGISTER BLUEPRINTS ==========
 from blueprints import (
     rate_limit_bp, tts_bp 
 )
 
-# Register WAF admin blueprint FIRST
 app.register_blueprint(waf_admin_bp)
-
-# Register all other blueprints
 app.register_blueprint(auth_bp)
 app.register_blueprint(tracking_bp)
 app.register_blueprint(upload_bp)
@@ -144,10 +128,9 @@ def serve_static(filename):
 def serve_audio_cache(filename):
     return send_from_directory('audio_cache', filename, mimetype='audio/mpeg')
 
-# ========== WAF STATUS ENDPOINT ==========
+# ========== WAF STATUS ==========
 @app.route('/api/waf/status', methods=['GET'])
 def waf_status():
-    """Public WAF status endpoint (no auth required)"""
     return jsonify({
         'enabled': app.config.get('WAF_ENABLED', False),
         'redis_available': app.config.get('WAF_ENABLED', False),
@@ -172,7 +155,7 @@ def internal_error_handler(e):
     print(f"Internal error: {e}")
     return jsonify({'error': 'Internal server error'}), 500
 
-# ========== DATABASE INITIALIZATION ==========
+# ========== DATABASE ==========
 with app.app_context():
     db.create_all()
     print("✅ Database tables created/verified")
@@ -181,7 +164,7 @@ with app.app_context():
 from services.scheduler import start_scheduler
 start_scheduler(app)
 
-# ========== RUN APP ==========
+# ========== RUN ==========
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
