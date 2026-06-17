@@ -28,8 +28,9 @@ migrate.init_app(app, db)
 # ========== SECRET KEY ==========
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
 
-# ========== SESSION CONFIGURATION ==========
-app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_TYPE'] = 'sqlalchemy'                   
+app.config['SESSION_SQLALCHEMY'] = db                        
+app.config['SESSION_SQLALCHEMY_TABLE'] = 'sessions'           
 app.config['SESSION_PERMANENT'] = True
 app.config['SESSION_USE_SIGNER'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
@@ -37,12 +38,11 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'True').lower() == 'true'
 app.config['SESSION_COOKIE_PATH'] = '/'
 app.config['SESSION_REFRESH_EACH_REQUEST'] = True
-app.config['PERMANENT_SESSION_LIFETIME'] = 86400
-app.config['SESSION_COOKIE_DOMAIN'] = None
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400  
 
-Session(app)
-
-init_limiter(app)
+# Initialize the session with the app
+from exts import sess
+sess.init_app(app)
 
 # ========== SESSION KEEP-ALIVE ==========
 @app.before_request
