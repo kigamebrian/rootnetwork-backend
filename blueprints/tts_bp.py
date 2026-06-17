@@ -15,9 +15,20 @@ tts_bp = Blueprint('tts', __name__, url_prefix='/api/tts')
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'audio_cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# ========== HELPER FOR CORS ==========
+def get_allowed_origin():
+    origin = request.headers.get('Origin', '')
+    allowed_origins = [
+        'https://rootnetwork1.netlify.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+    ]
+    if origin in allowed_origins:
+        return origin
+    return 'https://rootnetwork1.netlify.app'
+
 def get_cache_key(text, title):
     """Generate a unique cache key based on content"""
-    # Use first 300 chars + title to generate hash (reduced from 500)
     content_hash = hashlib.md5(text[:300].encode()).hexdigest()
     title_hash = hashlib.md5(title.encode()).hexdigest()
     return f"{title_hash}_{content_hash}.mp3"
@@ -26,25 +37,23 @@ def clean_text(text):
     """Clean HTML and extract meaningful text for TTS - FASTER"""
     if not text:
         return ""
-    
-    # Simplified cleaning for speed
-    text = re.sub(r'<[^>]+>', ' ', text)  # Remove HTML
-    text = re.sub(r'\s+', ' ', text)       # Normalize whitespace
-    text = re.sub(r'[^\w\s\.\,\!\?\-\'\"]', ' ', text)  # Keep basic punctuation
-    
-    return text.strip()[:2000]  # Reduced from 3000 to 2000 chars for faster generation
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^\w\s\.\,\!\?\-\'\"]', ' ', text)
+    return text.strip()[:2000]
 
 @tts_bp.route('/speak', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 def text_to_speech():
+    # Handle preflight OPTIONS
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", "http://localhost:3000")
-        response.headers.add("Access-Control-Allow-Credentials", "true")
-        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
         return response, 200
-    
+
     start_time = time.time()
     try:
         data = request.json
@@ -60,7 +69,6 @@ def text_to_speech():
         if not text or len(text) < 50:
             return jsonify({'error': f'Text too short ({len(text)} chars)'}), 400
         
-        # Clean the text (reduced length for speed)
         cleaned_text = clean_text(text)
         
         if len(cleaned_text) < 30:
@@ -68,25 +76,20 @@ def text_to_speech():
         
         print(f"📝 Cleaned text length: {len(cleaned_text)} chars")
         
-        # Generate cache key
+        # Cache check
         cache_key = get_cache_key(cleaned_text, title)
         cache_path = os.path.join(CACHE_DIR, cache_key)
         
-        # Check if audio already exists in cache
         if os.path.exists(cache_path):
             file_size = os.path.getsize(cache_path)
             print(f"✅ Cache HIT! Time: {time.time() - start_time:.2f}s")
-            
             return send_file(
                 cache_path,
                 mimetype='audio/mpeg',
                 as_attachment=False
             )
         
-        # Generate new audio (cache miss)
         print(f"🎤 Generating NEW audio...")
-        
-        # Generate speech with timeout handling
         tts = gTTS(text=cleaned_text, lang='en', slow=False)
         tts.save(cache_path)
         
