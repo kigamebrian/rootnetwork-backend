@@ -33,4 +33,4 @@ csrf = CSRFProtect()
 migrate = Migrate()
 
 # Session - new
-sess = Session()   # <-- ADD THIS
+sess = Session()   
