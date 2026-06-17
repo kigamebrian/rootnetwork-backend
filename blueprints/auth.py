@@ -16,7 +16,7 @@ def get_allowed_origin():
         'http://localhost:3000',
         'http://127.0.0.1:3000'
     ]
-    return origin if origin in allowed_origins else 'https://rootnetwork.netlify.app'
+    return origin if origin in allowed_origins else 'https://rootnetwork1.netlify.app'
 
 # ---------- REGISTER ----------
 @auth_bp.route('/register', methods=['POST', 'OPTIONS'])
