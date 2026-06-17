@@ -6,6 +6,7 @@ from flask_mail import Mail
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
 from flask_migrate import Migrate
+from flask_session import Session   # <-- ADD THIS
 
 # Database - declare only once
 db = SQLAlchemy()
@@ -14,13 +15,13 @@ db = SQLAlchemy()
 mail = Mail()
 
 # Fake data
-faker = Faker('zh_CN')  # You can change to 'en_US' for English
+faker = Faker('zh_CN')
 
 # Login
 loginmanager = LoginManager()
 loginmanager.login_view = 'auth.login'
 loginmanager.login_message_category = 'warning'
-loginmanager.login_message = u'请先登录'
+loginmanager.login_message = 'Please log in to access this page.'
 
 # Rich text editor
 ckeditor = CKEditor()
@@ -31,3 +32,5 @@ csrf = CSRFProtect()
 # Migration
 migrate = Migrate()
 
+# Session - new
+sess = Session()   # <-- ADD THIS
