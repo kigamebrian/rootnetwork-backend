@@ -101,7 +101,7 @@ def add_cors_headers(response):
     if origin in allowed_origins:
         response.headers['Access-Control-Allow-Origin'] = origin
     else:
-        response.headers['Access-Control-Allow-Origin'] = 'https://rootnetwork.netlify.app'
+        response.headers['Access-Control-Allow-Origin'] = 'https://rootnetwork1.netlify.app'
     
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken, X-Requested-With, Accept'
