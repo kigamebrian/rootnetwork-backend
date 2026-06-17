@@ -1,4 +1,4 @@
-# app.py - FINAL VERSION (with Cloudinary)
+# app.py - FINAL (clean CORS, uses config)
 from dotenv import load_dotenv
 from flask import send_from_directory, jsonify, make_response, request, session
 from flask_cors import CORS
@@ -15,12 +15,12 @@ from funcs import create_app, init_limiter
 from blueprints.waf_admin import waf_admin_bp
 from init_waf import init_waf
 from config import CORS_ORIGINS
-import cloudinary   # <-- ADDED
+import cloudinary
 
 load_dotenv()
 
-# ========== CLOUDINARY INITIALIZATION ==========
-cloudinary.config(secure=True)   # reads from CLOUDINARY_URL env var
+# Cloudinary
+cloudinary.config(secure=True)
 
 app = create_app()
 migrate.init_app(app, db)
@@ -42,7 +42,6 @@ app.config['SESSION_COOKIE_DOMAIN'] = None
 
 Session(app)
 
-# Initialize limiter
 init_limiter(app)
 
 # ========== SESSION KEEP-ALIVE ==========
@@ -51,19 +50,17 @@ def refresh_session():
     if 'user_id' in session:
         session.modified = True
 
-# ========== WAF INITIALIZATION ==========
+# ========== WAF ==========
 with app.app_context():
     waf_initialized = init_waf()
     app.config['WAF_ENABLED'] = waf_initialized
     print(f"🛡️ WAF initialized: {waf_initialized}")
 
-# ========== CORS CONFIGURATION (using config) ==========
-ALLOWED_ORIGINS = CORS_ORIGINS   # Use the list from config.py
-
+# ========== CORS (using config) ==========
 CORS(
     app,
     supports_credentials=True,
-    origins=ALLOWED_ORIGINS,
+    origins=CORS_ORIGINS,
     allow_headers=[
         "Content-Type",
         "Authorization",
@@ -82,25 +79,8 @@ CORS(
     expose_headers=["Content-Type", "X-CSRFToken"]
 )
 
-# ========== GLOBAL CORS HANDLER ==========
-@app.after_request
-def add_cors_headers(response):
-    origin = request.headers.get('Origin', '')
-    # Allow if origin is in the list, otherwise fallback to the first allowed origin
-    if origin in ALLOWED_ORIGINS:
-        response.headers['Access-Control-Allow-Origin'] = origin
-    else:
-        response.headers['Access-Control-Allow-Origin'] = ALLOWED_ORIGINS[0]  # or 'https://rootnetwork1.netlify.app'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken, X-Requested-With, Accept'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-    response.headers['Access-Control-Expose-Headers'] = 'Content-Type, X-CSRFToken'
-    return response
-
 # ========== REGISTER BLUEPRINTS ==========
-from blueprints import (
-    rate_limit_bp, tts_bp 
-)
+from blueprints import rate_limit_bp, tts_bp
 
 app.register_blueprint(waf_admin_bp)
 app.register_blueprint(auth_bp)
@@ -131,24 +111,20 @@ def serve_audio_cache(filename):
 # ========== WAF STATUS ==========
 @app.route('/api/waf/status', methods=['GET'])
 def waf_status():
-    return jsonify({
-        'enabled': app.config.get('WAF_ENABLED', False),
-        'redis_available': app.config.get('WAF_ENABLED', False),
-        'version': '1.0.0'
-    })
+    return jsonify({'enabled': app.config.get('WAF_ENABLED', False)})
 
 # ========== ERROR HANDLERS ==========
 @app.errorhandler(429)
 def ratelimit_handler(e):
-    return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+    return jsonify({'error': 'Rate limit exceeded'}), 429
 
 @app.errorhandler(400)
 def bad_request_handler(e):
-    return jsonify({'error': 'Bad request. Please check your input.'}), 400
+    return jsonify({'error': 'Bad request'}), 400
 
 @app.errorhandler(404)
 def not_found_handler(e):
-    return jsonify({'error': 'Endpoint not found'}), 404
+    return jsonify({'error': 'Not found'}), 404
 
 @app.errorhandler(500)
 def internal_error_handler(e):
