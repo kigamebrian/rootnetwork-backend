@@ -7,14 +7,14 @@ from middleware.security_middleware import security_middleware
 from . import admin_posts_bp
 from datetime import datetime, timezone
 from services import send_admin_new_post_background, send_post_author_post_created_background
+from services.logging_service import logger   # <-- ADDED
 
+# ---------- ANALYTICS TRACKING (optional) ----------
 def track_action(action_type, action_details, target_id, target_type):
-    """Helper function to track user actions"""
     try:
-        from backend.src.models import UserAction
+        from models import UserAction   # fixed import
         session_id = get_session_id()
         user_id = session.get('user_id')
-        
         action = UserAction(
             user_id=user_id,
             session_id=session_id,
@@ -29,50 +29,40 @@ def track_action(action_type, action_details, target_id, target_type):
     except Exception as e:
         print(f"Failed to track action: {e}")
 
+# ---------- HELPER: parse scheduled datetime ----------
 def parse_scheduled_datetime(dt_str):
-    """Parse ISO datetime string and convert to UTC"""
     if not dt_str:
         return None
-    
     try:
-        # Parse the datetime string
         if dt_str.endswith('Z'):
             dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
         else:
             dt = datetime.fromisoformat(dt_str)
-        
-        # If naive (no timezone), assume it's UTC
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         else:
-            # Convert to UTC
             dt = dt.astimezone(timezone.utc)
-        
         return dt
     except Exception as e:
         print(f"Error parsing datetime: {e}")
         return None
 
+# ---------- GET all posts (admin) ----------
 @admin_posts_bp.route('/posts', methods=['GET'])
 @csrf.exempt
 def get_admin_posts():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         user = User.query.get(session['user_id'])
         status_filter = request.args.get('status', 'all')
-        
         if user.is_super_admin:
             query = Post.query.order_by(Post.id.desc())
         else:
             query = Post.query.filter_by(author_id=user.id).order_by(Post.id.desc())
-        
         if status_filter != 'all':
             query = query.filter_by(status=status_filter)
-        
         posts = query.all()
-        
         return jsonify([{
             'id': p.id,
             'slug': p.slug,
@@ -92,6 +82,7 @@ def get_admin_posts():
         print(f"Error in get_admin_posts: {e}")
         return jsonify({'error': str(e)}), 500
 
+# ---------- CREATE post ----------
 @admin_posts_bp.route('/posts', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -99,13 +90,10 @@ def get_admin_posts():
 def create_post():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         data = request.json
-        
         sanitized_title = data.get('title', '')[:200]
         sanitized_content = sanitize_html(data.get('content', ''))
-        
         if not sanitized_title or len(sanitized_title) < 3:
             return jsonify({'error': 'Title must be at least 3 characters'}), 400
         
@@ -116,7 +104,6 @@ def create_post():
             slug = f"{original_slug}-{counter}"
             counter += 1
         
-        # Handle post status
         status = data.get('status', 'draft')
         scheduled_for = None
         timestamp = None
@@ -149,18 +136,16 @@ def create_post():
         db.session.add(post)
         db.session.commit()
         
-        # Send notifications only for immediately published posts
+        # --- Notifications ---
         if status == 'published':
             send_admin_new_post_background(post)
             send_post_author_post_created_background(post)
         
-        status_message = {
-            'draft': 'saved as draft',
-            'published': 'published successfully',
-            'scheduled': f'scheduled for {scheduled_for}'
-        }.get(status, 'saved')
+        # --- LOGGING: record creation in ActivityLog ---
+        user = User.query.get(session['user_id'])
+        logger.log_post_creation(user, post.id, post.title)
         
-        # Track action
+        # Optional analytics tracking
         track_action(
             action_type='create_post',
             action_details=f'Created post: {sanitized_title} (Status: {status})',
@@ -168,9 +153,15 @@ def create_post():
             target_type='post'
         )
         
+        status_message = {
+            'draft': 'saved as draft',
+            'published': 'published successfully',
+            'scheduled': f'scheduled for {scheduled_for}'
+        }.get(status, 'saved')
+        
         return jsonify({
-            'message': f'Post {status_message}', 
-            'id': post.id, 
+            'message': f'Post {status_message}',
+            'id': post.id,
             'slug': post.slug,
             'status': status
         }), 201
@@ -181,26 +172,20 @@ def create_post():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ---------- GET post for edit ----------
 @admin_posts_bp.route('/posts/<string:slug>', methods=['GET'])
 @csrf.exempt
 def get_post_for_edit(slug):
-    print(f"🔵 Fetching post for edit with slug: {slug}")
-    
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         post = Post.query.filter_by(slug=slug).first()
         if not post:
-            print(f"🔴 Post not found with slug: {slug}")
             return jsonify({'error': 'Post not found'}), 404
-        
         user = User.query.get(session['user_id'])
-        
         if not user.is_super_admin and post.author_id != user.id:
             return jsonify({'error': 'You can only edit your own posts'}), 403
-        
-        response_data = {
+        return jsonify({
             'id': post.id,
             'slug': post.slug,
             'title': post.title,
@@ -211,39 +196,28 @@ def get_post_for_edit(slug):
             'status': post.status,
             'scheduled_for': post.scheduled_for.isoformat() if post.scheduled_for else None,
             'published_at': post.published_at.isoformat() if post.published_at else None
-        }
-        
-        print(f"🟢 Returning post data for: {post.title}")
-        print(f"📝 Content length: {len(post.content)} characters")
-        print(f"📊 Status: {post.status}")
-        
-        return jsonify(response_data), 200
+        }), 200
     except Exception as e:
-        print(f"❌ Error in get_post_for_edit: {e}")
+        print(f"Error in get_post_for_edit: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ---------- UPDATE post ----------
 @admin_posts_bp.route('/posts/<int:post_id>', methods=['PUT'])
 @csrf.exempt
 @login_required
 @security_middleware
 def update_post(post_id):
-    print(f"🔵 Updating post with ID: {post_id}")
-    
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         post = Post.query.get_or_404(post_id)
         user = User.query.get(session['user_id'])
-        
         if not user.is_super_admin and post.author_id != user.id:
             return jsonify({'error': 'You can only edit your own posts'}), 403
         
         data = request.json
-        print(f"🟡 Received data keys: {list(data.keys()) if data else 'None'}")
-        
         old_title = post.title
         changes_made = False
         now = datetime.now(timezone.utc)
@@ -260,37 +234,29 @@ def update_post(post_id):
                     counter += 1
                 post.slug = new_slug
                 changes_made = True
-                print(f"📝 Title updated: {old_title} -> {sanitized_title}")
         
         if data.get('content'):
             sanitized_content = data['content']
             if post.content != sanitized_content:
                 post.content = sanitized_content
                 changes_made = True
-                print(f"📝 Content updated, new length: {len(sanitized_content)}")
         
         if 'image' in data:
             if post.image != data['image']:
                 post.image = data['image']
                 changes_made = True
-                print(f"🖼️ Image updated: {data['image']}")
         
         if 'category_id' in data:
             if post.category_id != data['category_id']:
                 post.category_id = data['category_id']
                 changes_made = True
-                print(f"📂 Category updated to ID: {data['category_id']}")
         
-        # Handle status update
         if 'status' in data:
             new_status = data['status']
             if new_status != post.status:
                 old_status = post.status
                 post.status = new_status
                 changes_made = True
-                print(f"📊 Status changed: {old_status} -> {new_status}")
-                
-                # Handle scheduling changes
                 if new_status == 'scheduled':
                     scheduled_for = parse_scheduled_datetime(data.get('scheduled_for'))
                     post.scheduled_for = scheduled_for
@@ -305,20 +271,19 @@ def update_post(post_id):
                     post.published_at = None
                     post.scheduled_for = None
             elif new_status == 'scheduled' and data.get('scheduled_for'):
-                # Update scheduled time even if status hasn't changed
                 scheduled_for = parse_scheduled_datetime(data['scheduled_for'])
                 if post.scheduled_for != scheduled_for:
                     post.scheduled_for = scheduled_for
                     changes_made = True
-                    print(f"📅 Scheduled time updated: {scheduled_for}")
         
         if changes_made:
             db.session.commit()
-            print(f"✅ Post updated successfully: {post.title}")
+            # --- LOGGING: record update in ActivityLog ---
+            logger.log_post_update(user, post.id, post.title)
         else:
-            print("⚠️ No changes detected in post update")
+            print("No changes detected")
         
-        # Track action
+        # Optional analytics tracking
         track_action(
             action_type='update_post',
             action_details=f'Updated post: {old_title} -> {post.title}',
@@ -329,34 +294,33 @@ def update_post(post_id):
         return jsonify({'message': 'Post updated successfully', 'slug': post.slug}), 200
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Error in update_post: {e}")
+        print(f"Error in update_post: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ---------- DELETE post ----------
 @admin_posts_bp.route('/posts/<int:post_id>', methods=['DELETE'])
 @csrf.exempt
 @login_required
 @security_middleware
 def delete_post(post_id):
-    print(f"🔵 Deleting post with ID: {post_id}")
-    
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         post = Post.query.get_or_404(post_id)
         user = User.query.get(session['user_id'])
-        
         if not user.is_super_admin and post.author_id != user.id:
             return jsonify({'error': 'You can only delete your own posts'}), 403
         
         post_title = post.title
-        
         db.session.delete(post)
         db.session.commit()
         
-        # Track action
+        # --- LOGGING: record deletion in ActivityLog ---
+        logger.log_post_deletion(user, post_id, post_title)
+        
+        # Optional analytics tracking
         track_action(
             action_type='delete_post',
             action_details=f'Deleted post: {post_title}',
@@ -364,9 +328,8 @@ def delete_post(post_id):
             target_type='post'
         )
         
-        print(f"✅ Post deleted: {post_title}")
         return jsonify({'message': 'Post deleted successfully'})
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Error in delete_post: {e}")
+        print(f"Error in delete_post: {e}")
         return jsonify({'error': str(e)}), 500
