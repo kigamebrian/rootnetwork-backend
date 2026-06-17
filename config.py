@@ -38,7 +38,7 @@ BLOG_NAME = os.environ.get('BLOG_NAME', 'RootNetwork')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 CORS_ORIGINS = os.environ.get(
     'CORS_ORIGINS', 
-    'http://localhost:3000,http://127.0.0.1:3000,https://rootnetwork.netlify.app'
+    'http://localhost:3000,http://127.0.0.1:3000,https://rootnetwork1.netlify.app/'
 ).split(',')
 # Security configuration
 ALLOWED_TAGS = [
