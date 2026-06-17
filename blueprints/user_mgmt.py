@@ -12,11 +12,11 @@ from services import send_welcome_email_background
 def get_allowed_origin():
     origin = request.headers.get('Origin', '')
     allowed_origins = [
-        'https://rootnetwork.netlify.app',
+        'https://rootnetwork1.netlify.app',
         'http://localhost:3000',
         'http://127.0.0.1:3000'
     ]
-    return origin if origin in allowed_origins else 'https://rootnetwork.netlify.app'
+    return origin if origin in allowed_origins else 'https://rootnetwork1.netlify.app'
 
 def track_action(action_type, action_details, target_id, target_type):
     try:
