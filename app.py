@@ -60,7 +60,7 @@ with app.app_context():
 
 # ========== CORS CONFIGURATION ==========
 ALLOWED_ORIGINS = [
-    "https://rootnetwork.netlify.app",
+    "https://rootnetwork1.netlify.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
 ]
@@ -93,7 +93,7 @@ def add_cors_headers(response):
     """Add CORS headers to every response, overriding blueprint-level headers"""
     origin = request.headers.get('Origin', '')
     allowed_origins = [
-        'https://rootnetwork.netlify.app',
+        'https://rootnetwork1.netlify.app',
         'http://localhost:3000',
         'http://127.0.0.1:3000'
     ]
