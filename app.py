@@ -60,7 +60,7 @@ with app.app_context():
 CORS(
     app,
     supports_credentials=True,
-    origins=CORS_ORIGINS,
+    origins=CORS_ORIGINS,                     # <-- reads from config.py
     allow_headers=[
         "Content-Type",
         "Authorization",
