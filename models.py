@@ -395,3 +395,99 @@ class TrendingNews(db.Model):
     def __repr__(self):
         return f"<TrendingNews id={self.id} headline='{self.headline[:50]}'>"
 
+# ========== SUBSCRIBER MODELS ==========
+
+class Subscriber(db.Model):
+    __tablename__ = 'subscribers'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(254), unique=True, nullable=False, index=True)
+    verified = db.Column(db.Boolean, default=False, nullable=False)
+    verification_token = db.Column(db.String(100), unique=True)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    # Preferences: JSON with { "categories": [1,2,3], "frequency": "instant"|"daily"|"weekly" }
+    preferences = db.Column(db.JSON, default={'categories': [], 'frequency': 'daily'})
+    subscribed_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    unsubscribed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    last_sent_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Relationship to notifications
+    notifications = db.relationship('PostNotification', backref='subscriber', lazy='dynamic', cascade='all, delete-orphan')
+    
+    __table_args__ = (
+        db.CheckConstraint("email LIKE '%_@_%._%'", name='check_subscriber_email_format'),
+    )
+    
+    def is_active(self):
+        return self.verified and self.unsubscribed_at is None
+    
+    def __repr__(self):
+        return f"<Subscriber id={self.id} email='{self.email}'>"
+
+
+class PostNotification(db.Model):
+    __tablename__ = 'post_notifications'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id', ondelete='CASCADE'), nullable=False, index=True)
+    subscriber_id = db.Column(db.Integer, db.ForeignKey('subscribers.id', ondelete='CASCADE'), nullable=False, index=True)
+    sent_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    status = db.Column(db.String(20), default='pending', nullable=False)  # pending, sent, failed, skipped
+    error_message = db.Column(db.Text, nullable=True)
+    
+    post = db.relationship('Post', backref='subscriber_notifications')
+    
+    __table_args__ = (
+        db.CheckConstraint("status IN ('pending', 'sent', 'failed', 'skipped')", name='check_notification_status'),
+        db.UniqueConstraint('post_id', 'subscriber_id', name='uq_post_subscriber'),
+    )
+    
+    def __repr__(self):
+        return f"<PostNotification post_id={self.post_id} subscriber_id={self.subscriber_id} status='{self.status}'>"
+
+
+# ========== DIGEST LOG (OPTIONAL) ==========
+class DigestLog(db.Model):
+    __tablename__ = 'digest_logs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    subscriber_id = db.Column(db.Integer, db.ForeignKey('subscribers.id', ondelete='CASCADE'), nullable=False, index=True)
+    frequency = db.Column(db.String(20), nullable=False)  # daily, weekly
+    sent_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    post_ids = db.Column(db.JSON, nullable=False)  # list of post IDs included
+    status = db.Column(db.String(20), default='sent')
+    
+    subscriber = db.relationship('Subscriber', backref='digest_logs')
+
+# models.py
+class AppSetting(db.Model):
+    __tablename__ = 'app_settings'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False)
+    value = db.Column(db.Text, nullable=False)
+    description = db.Column(db.String(255))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    @classmethod
+    def get(cls, key, default=None):
+        try:
+            setting = cls.query.filter_by(key=key).first()
+            if setting:
+                return setting.value
+        except Exception:
+            # Table may not exist yet (e.g., before migration)
+            pass
+        return default
+    
+    @classmethod
+    def set(cls, key, value, description=None):
+        setting = cls.query.filter_by(key=key).first()
+        if setting:
+            setting.value = value
+            setting.description = description
+        else:
+            setting = cls(key=key, value=value, description=description)
+            db.session.add(setting)
+        db.session.commit()
