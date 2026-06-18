@@ -9,20 +9,56 @@ from services.background_email import send_email_background
 
 load_dotenv()
 
-# Email configuration
+# ========== CONFIGURATION (all from environment) ==========
 SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 SMTP_USER = os.getenv('SMTP_USER', '')
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
 FROM_EMAIL = os.getenv('FROM_EMAIL', SMTP_USER)
 BLOG_NAME = os.getenv('BLOG_NAME', 'RootNetwork')
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')   # consistent
+
+# ========== GENERIC EMAIL SENDER (only one) ==========
+def send_email(to_email, subject, html_content, text_content=None):
+    """
+    Send an email using SMTP (Gmail or any provider).
+    Returns True on success, False on failure.
+    """
+    try:
+        if not SMTP_USER or not SMTP_PASSWORD:
+            print("⚠️ Email not configured. SMTP credentials missing.")
+            print(f"Would have sent email to: {to_email}")
+            print(f"Subject: {subject}")
+            return False
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = FROM_EMAIL
+        msg['To'] = to_email
+
+        if text_content:
+            msg.attach(MIMEText(text_content, 'plain'))
+        msg.attach(MIMEText(html_content, 'html'))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+
+        print(f"✅ Email sent to {to_email}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Failed to send email to {to_email}: {e}")
+        return False
+
+
+# ========== SPECIFIC EMAIL FUNCTIONS ==========
 
 def send_welcome_email(email, name, username, password):
     """Send welcome email to newly created user with their credentials"""
-    
     subject = f"Welcome to {BLOG_NAME} - Your Writer Account"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -86,7 +122,7 @@ def send_welcome_email(email, name, username, password):
     </body>
     </html>
     """
-    
+
     text_content = f"""
     Welcome to {BLOG_NAME}!
     
@@ -113,44 +149,9 @@ def send_welcome_email(email, name, username, password):
     
     If you didn't expect this email, please contact the site administrator.
     """
-    
+
     return send_email(email, subject, html_content, text_content)
 
-def send_email(to_email, subject, html_content, text_content=None):
-    """Generic email sender"""
-    try:
-        if not SMTP_USER or not SMTP_PASSWORD:
-            print("⚠️ Email not configured. SMTP credentials missing.")
-            print(f"Would have sent email to: {to_email}")
-            print(f"Subject: {subject}")
-            return False
-        
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = FROM_EMAIL
-        msg['To'] = to_email
-        
-        # Attach plain text version
-        if text_content:
-            msg.attach(MIMEText(text_content, 'plain'))
-        
-        # Attach HTML version
-        msg.attach(MIMEText(html_content, 'html'))
-        
-        # Send email
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-        
-        print(f"✅ Email sent to {to_email}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Failed to send email to {to_email}: {e}")
-        return False
-
-# Add these to your email_service.py
 
 def email_to_admin(comment, post, admin_email=None):
     """Send email to admin when new comment is posted"""
@@ -158,9 +159,9 @@ def email_to_admin(comment, post, admin_email=None):
     if not admin_email:
         print("⚠️ Admin email not configured")
         return False
-    
+
     subject = f"New Comment on '{post.title}' - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -184,7 +185,7 @@ def email_to_admin(comment, post, admin_email=None):
     </body>
     </html>
     """
-    
+
     return send_email(admin_email, subject, html_content)
 
 
@@ -193,9 +194,9 @@ def email_to_author(comment, post):
     author_email = post.author.email if post.author else None
     if not author_email:
         return False
-    
+
     subject = f"New Comment on Your Post '{post.title}' - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -219,7 +220,7 @@ def email_to_author(comment, post):
     </body>
     </html>
     """
-    
+
     return send_email(author_email, subject, html_content)
 
 
@@ -227,9 +228,9 @@ def email_to_author_comment_approved(comment, post):
     """Send email to comment author when their comment is approved"""
     if not comment.email:
         return False
-    
+
     subject = f"Your Comment on '{post.title}' has been Approved - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -252,22 +253,21 @@ def email_to_author_comment_approved(comment, post):
     </body>
     </html>
     """
-    
+
     return send_email(comment.email, subject, html_content)
 
 
 def notify_admin_new_comment(comment, post, admin_email=None):
-    """Send email to admin when new comment is posted"""
+    """Send email to all super admins when new comment is posted"""
     from models import User
     admin_email = admin_email or os.getenv('ADMIN_EMAIL', SMTP_USER)
-    
-    # Get all super admins
+
     super_admins = User.query.filter_by(is_super_admin=True).all()
     emails = [admin_email] + [u.email for u in super_admins if u.email]
-    emails = list(set(emails))  
-    
+    emails = list(set(emails))
+
     subject = f"🔔 New Comment on '{post.title}' - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -296,23 +296,22 @@ def notify_admin_new_comment(comment, post, admin_email=None):
     </body>
     </html>
     """
-    
+
     for email in emails:
         send_email(email, subject, html_content)
     return True
 
 
 def notify_author_new_comment(comment, post):
-    """Send email to post author when someone comments on their post"""
+    """Send email to post author when someone comments on their post (if not admin)"""
     if not post.author or not post.author.email:
         return False
-    
-    # Don't notify if author is super admin (they already get admin notification)
+
     if post.author.is_super_admin:
         return False
-    
+
     subject = f"💬 New Comment on Your Post '{post.title}' - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -341,16 +340,16 @@ def notify_author_new_comment(comment, post):
     </body>
     </html>
     """
-    
+
     return send_email(post.author.email, subject, html_content)
 
 
 def notify_admin_new_post(post, admin_email=None):
     """Send email to admin when a new post is published"""
     admin_email = admin_email or os.getenv('ADMIN_EMAIL', SMTP_USER)
-    
+
     subject = f"📝 New Post Published: {post.title} - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -375,7 +374,7 @@ def notify_admin_new_post(post, admin_email=None):
     </body>
     </html>
     """
-    
+
     return send_email(admin_email, subject, html_content)
 
 
@@ -383,9 +382,9 @@ def notify_post_author_post_created(post):
     """Send email to post author confirming their post was published"""
     if not post.author or not post.author.email:
         return False
-    
+
     subject = f"✅ Your Post '{post.title}' has been Published - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -410,7 +409,7 @@ def notify_post_author_post_created(post):
     </body>
     </html>
     """
-    
+
     return send_email(post.author.email, subject, html_content)
 
 
@@ -419,9 +418,9 @@ def notify_admin_intrusion_detected(threat, ip_address, endpoint):
     admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
     if not admin_email:
         return False
-    
+
     subject = f"🚨 SECURITY ALERT: Intrusion Detected - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -451,7 +450,7 @@ def notify_admin_intrusion_detected(threat, ip_address, endpoint):
     </body>
     </html>
     """
-    
+
     return send_email(admin_email, subject, html_content)
 
 
@@ -460,9 +459,9 @@ def notify_admin_failed_login(ip_address, attempts_count, username_attempted):
     admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
     if not admin_email:
         return False
-    
+
     subject = f"⚠️ Multiple Failed Login Attempts - {BLOG_NAME}"
-    
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -486,40 +485,93 @@ def notify_admin_failed_login(ip_address, attempts_count, username_attempted):
     </body>
     </html>
     """
-    
+
     return send_email(admin_email, subject, html_content)
 
+
+# ========== SUBSCRIBER EMAILS ==========
+
+def send_verification_email(email, token):
+    """Send verification email with subscription confirmation link."""
+    verify_url = f"{FRONTEND_URL}/subscribe/verify/{token}"
+    subject = "Confirm your subscription"
+    html_content = f"""
+    <h2>Welcome!</h2>
+    <p>Thank you for subscribing to RootNetwork. Please click the link below to confirm your email address:</p>
+    <p><a href="{verify_url}">Confirm Subscription</a></p>
+    <p>If you didn't request this, please ignore this email.</p>
+    """
+    send_email(email, subject, html_content)
+
+
+def send_post_notification_email(subscriber, post):
+    """Send instant notification for a new post."""
+    post_url = f"{FRONTEND_URL}/blog/post/{post.slug}"
+    subject = f"New article: {post.title}"
+    html_content = f"""
+    <h2>New post on RootNetwork</h2>
+    <p><strong>{post.title}</strong></p>
+    <p>{post.content[:200]}...</p>
+    <p><a href="{post_url}">Read full article</a></p>
+    <hr>
+    <p style="font-size:12px; color:#888;">You received this because you subscribed to instant notifications. 
+    <a href="{FRONTEND_URL}/subscribe/preferences?email={subscriber.email}">Manage preferences</a> | 
+    <a href="{FRONTEND_URL}/subscribe/unsubscribe?email={subscriber.email}">Unsubscribe</a></p>
+    """
+    send_email(subscriber.email, subject, html_content)
+
+
+def send_digest_email(subscriber, posts, frequency='daily'):
+    """Send digest email with multiple posts."""
+    subject = f"Your {frequency} digest from RootNetwork"
+    post_list = ''.join([
+        f'<li><a href="{FRONTEND_URL}/blog/post/{p.slug}">{p.title}</a> - {p.category.name if p.category else "Uncategorized"}</li>'
+        for p in posts
+    ])
+    html_content = f"""
+    <h2>Your {frequency.capitalize()} Digest</h2>
+    <p>Here are the latest articles we thought you'd like:</p>
+    <ul>{post_list}</ul>
+    <p><a href="{FRONTEND_URL}">Visit RootNetwork</a></p>
+    <hr>
+    <p style="font-size:12px; color:#888;">
+        You received this because you subscribed to {frequency} updates. 
+        <a href="{FRONTEND_URL}/subscribe/preferences?email={subscriber.email}">Manage preferences</a> | 
+        <a href="{FRONTEND_URL}/subscribe/unsubscribe?email={subscriber.email}">Unsubscribe</a>
+    </p>
+    """
+    send_email(subscriber.email, subject, html_content)
+
+
+def send_unsubscribe_confirmation(email):
+    """Send confirmation email after unsubscribe."""
+    subject = "You've been unsubscribed"
+    html_content = f"""
+    <p>You have successfully unsubscribed from RootNetwork notifications.</p>
+    <p>If this was a mistake, you can <a href="{FRONTEND_URL}/subscribe">subscribe again</a>.</p>
+    """
+    send_email(email, subject, html_content)
+
+
+# ========== BACKGROUND WRAPPERS ==========
+
 def send_admin_new_post_background(post, admin_email=None):
-    """Send admin new post notification in background"""
-    from services.email_service import notify_admin_new_post
     send_email_background(notify_admin_new_post, post, admin_email)
 
 def send_post_author_post_created_background(post):
-    """Send author post created notification in background"""
-    from services.email_service import notify_post_author_post_created
     send_email_background(notify_post_author_post_created, post)
 
 def send_admin_new_comment_background(comment, post, admin_email=None):
-    """Send admin new comment notification in background"""
-    from services.email_service import notify_admin_new_comment
     send_email_background(notify_admin_new_comment, comment, post, admin_email)
 
 def send_author_new_comment_background(comment, post):
-    """Send author new comment notification in background"""
-    from services.email_service import notify_author_new_comment
     send_email_background(notify_author_new_comment, comment, post)
 
 def send_welcome_email_background(email, name, username, password):
-    """Send welcome email in background"""
-    from services.email_service import send_welcome_email
     send_email_background(send_welcome_email, email, name, username, password)
 
 def send_admin_intrusion_detected_background(threat, ip_address, endpoint):
-    """Send intrusion alert in background"""
-    from services.email_service import notify_admin_intrusion_detected
     send_email_background(notify_admin_intrusion_detected, threat, ip_address, endpoint)
 
 def send_admin_failed_login_background(ip_address, attempts_count, username_attempted):
-    """Send failed login alert in background"""
-    from services.email_service import notify_admin_failed_login
     send_email_background(notify_admin_failed_login, ip_address, attempts_count, username_attempted)
