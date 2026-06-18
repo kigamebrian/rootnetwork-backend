@@ -49,15 +49,14 @@ def update_scheduler_settings():
         return response, 200
 
     data = request.get_json()
-    
+
     required = ['daily_digest_hour', 'daily_digest_minute', 
                 'weekly_digest_day', 'weekly_digest_hour', 'weekly_digest_minute',
                 'publish_interval_minutes']
     for key in required:
         if key not in data:
             return jsonify({'error': f'Missing field: {key}'}), 400
-    
-    # Validate values
+
     try:
         hour = int(data['daily_digest_hour'])
         if not (0 <= hour <= 23):
@@ -79,13 +78,11 @@ def update_scheduler_settings():
             return jsonify({'error': 'publish_interval_minutes must be at least 1'}), 400
     except ValueError:
         return jsonify({'error': 'Invalid number format'}), 400
-    
-    # Save to database
+
     for key, value in data.items():
         AppSetting.set(key, str(value))
-    
-    # Reload scheduler
+
     from services.scheduler import reload_scheduler
     reload_scheduler(current_app._get_current_object())
-    
+
     return jsonify({'message': 'Settings updated and scheduler reloaded'})
