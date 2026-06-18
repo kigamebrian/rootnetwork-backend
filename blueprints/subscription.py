@@ -1,9 +1,9 @@
-# blueprints/subscription_bp.py
-from flask import Blueprint, request, jsonify, session, make_response
+# blueprints/subscription.py
+from flask import Blueprint, request, jsonify, make_response
 from models import Subscriber, Category, db
 from services.email_service import send_verification_email
 from exts import csrf
-from datetime import datetime, timedelta, timezone  # <-- added timezone
+from datetime import datetime, timezone, timedelta
 import secrets
 import re
 
@@ -18,13 +18,6 @@ def get_allowed_origin():
         'http://127.0.0.1:3000'
     ]
     return origin if origin in allowed_origins else 'https://rootnetwork1.netlify.app'
-
-def _cors_response(response, status=200):
-    response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
-    return response, status
 
 # ================== SUBSCRIBE ==================
 @subscription_bp.route('', methods=['POST', 'OPTIONS'])
@@ -104,22 +97,22 @@ def verify(token):
     try:
         subscriber = Subscriber.query.filter_by(verification_token=token).first()
         if not subscriber:
-            return _cors_response(jsonify({'error': 'Invalid or expired verification token'}), 400)
+            return jsonify({'error': 'Invalid or expired verification token'}), 400
 
         if subscriber.expires_at and subscriber.expires_at < datetime.now(timezone.utc):
-            return _cors_response(jsonify({'error': 'Invalid or expired verification token'}), 400)
+            return jsonify({'error': 'Invalid or expired verification token'}), 400
 
         if subscriber.verified:
-            return _cors_response(jsonify({'message': 'You are already verified.'}), 200)
+            return jsonify({'message': 'You are already verified.'}), 200
 
         subscriber.verified = True
         db.session.commit()
-        return _cors_response(jsonify({'message': 'Email verified. You are now subscribed!'}), 200)
+        return jsonify({'message': 'Email verified. You are now subscribed!'}), 200
     except Exception as e:
         print(f"❌ Verification error: {e}")
         import traceback
         traceback.print_exc()
-        return _cors_response(jsonify({'error': 'Verification failed. Please try again.'}), 500)
+        return jsonify({'error': 'Verification failed. Please try again.'}), 500
 
 # ================== UNSUBSCRIBE ==================
 @subscription_bp.route('/unsubscribe', methods=['POST', 'OPTIONS'])
