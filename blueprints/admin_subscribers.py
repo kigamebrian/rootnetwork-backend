@@ -20,6 +20,7 @@ def get_allowed_origin():
     ]
     return origin if origin in allowed_origins else 'https://rootnetwork1.netlify.app'
 
+# ---------- LIST SUBSCRIBERS ----------
 @admin_subscribers_bp.route('', methods=['GET', 'OPTIONS'])
 @super_admin_required
 def list_subscribers():
@@ -61,6 +62,7 @@ def list_subscribers():
     }
     return jsonify(result), 200
 
+# ---------- GET SINGLE SUBSCRIBER ----------
 @admin_subscribers_bp.route('/<int:subscriber_id>', methods=['GET', 'OPTIONS'])
 @super_admin_required
 def get_subscriber(subscriber_id):
@@ -85,6 +87,7 @@ def get_subscriber(subscriber_id):
         'created_at': subscriber.created_at.isoformat() if subscriber.created_at else None,
     }), 200
 
+# ---------- ADMIN UNSUBSCRIBE ----------
 @admin_subscribers_bp.route('/<int:subscriber_id>/unsubscribe', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
@@ -106,6 +109,7 @@ def admin_unsubscribe(subscriber_id):
     logger.info(f"Admin unsubscribed subscriber {subscriber.email} (ID: {subscriber.id})")
     return jsonify({'message': f'Unsubscribed {subscriber.email}'}), 200
 
+# ---------- RESEND VERIFICATION ----------
 @admin_subscribers_bp.route('/<int:subscriber_id>/resend-verification', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
@@ -131,6 +135,7 @@ def resend_verification(subscriber_id):
     logger.info(f"Resent verification email to {subscriber.email}")
     return jsonify({'message': f'Verification email resent to {subscriber.email}'}), 200
 
+# ---------- DELETE SUBSCRIBER ----------
 @admin_subscribers_bp.route('/<int:subscriber_id>', methods=['DELETE', 'OPTIONS'])
 @csrf.exempt
 @super_admin_required
