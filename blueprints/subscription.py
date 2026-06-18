@@ -2,6 +2,7 @@
 from flask import Blueprint, request, jsonify, make_response
 from models import Subscriber, Category, db
 from services.email_service import send_verification_email
+from services.background_email import send_email_background   # <-- ADD THIS
 from exts import csrf
 from datetime import datetime, timezone, timedelta
 import secrets
@@ -64,7 +65,8 @@ def subscribe():
             subscriber.verification_token = secrets.token_urlsafe(32)
             subscriber.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
             db.session.commit()
-            send_verification_email(email, subscriber.verification_token)
+            # SEND IN BACKGROUND
+            send_email_background(send_verification_email, email, subscriber.verification_token)
             return jsonify({'message': 'Re-subscribed. Please verify your email.'}), 200
 
     # New subscriber
@@ -79,7 +81,8 @@ def subscribe():
     db.session.add(new_sub)
     db.session.commit()
 
-    send_verification_email(email, token)
+    # SEND IN BACKGROUND
+    send_email_background(send_verification_email, email, token)
     return jsonify({'message': 'Please check your email to verify your subscription.'}), 201
 
 # ================== VERIFY ==================
