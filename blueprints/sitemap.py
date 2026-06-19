@@ -1,20 +1,17 @@
 # blueprints/sitemap.py
 from flask import Blueprint, Response, request, current_app
-from models import Post, Category, generate_slug   # ✅ generate_slug imported
+from models import Post, Category, generate_slug
 from datetime import datetime
 import time
 import logging
+from xml.sax.saxutils import escape   # <-- ADD THIS
 
 logger = logging.getLogger(__name__)
 
 sitemap_bp = Blueprint('sitemap', __name__)
 
-# In‑memory cache fallback
-_memory_cache = {
-    'content': None,
-    'timestamp': 0
-}
-CACHE_TTL = 3600  # 1 hour
+_memory_cache = {'content': None, 'timestamp': 0}
+CACHE_TTL = 3600
 
 def _get_redis_client():
     try:
@@ -24,17 +21,15 @@ def _get_redis_client():
         return None
 
 def _generate_sitemap_xml(base_url):
-    """Generate the sitemap XML content."""
+    """Generate the sitemap XML content with proper escaping."""
     posts = Post.query.filter_by(status='published').order_by(Post.timestamp.desc()).all()
     
-    # Static pages
     static_pages = [
         {'loc': '/', 'lastmod': datetime.now().date().isoformat()},
         {'loc': '/about', 'lastmod': datetime.now().date().isoformat()},
         {'loc': '/blog', 'lastmod': datetime.now().date().isoformat()},
     ]
     
-    # Add category pages – generate slug from name using generate_slug
     categories = Category.query.all()
     for cat in categories:
         slug = generate_slug(cat.name)
@@ -74,7 +69,8 @@ def _generate_sitemap_xml(base_url):
                 image_url = f"{base_url}{post.image}" if post.image.startswith('/') else f"{base_url}/{post.image}"
             xml += f'    <image:image>\n'
             xml += f'      <image:loc>{image_url}</image:loc>\n'
-            xml += f'      <image:title>{post.title}</image:title>\n'
+            # --- ESCAPE the title ---
+            xml += f'      <image:title>{escape(post.title)}</image:title>\n'
             xml += f'    </image:image>\n'
         
         xml += '  </url>\n'
@@ -85,6 +81,8 @@ def _generate_sitemap_xml(base_url):
 @sitemap_bp.route('/sitemap.xml')
 def sitemap():
     base_url = request.host_url.rstrip('/')
+    # If you prefer the frontend domain, uncomment:
+    # base_url = "https://rootnetwork1.netlify.app"
     
     redis_client = _get_redis_client()
     cache_key = 'sitemap:xml'
@@ -112,5 +110,4 @@ def sitemap():
     _memory_cache['content'] = xml_content
     _memory_cache['timestamp'] = now
     
-    # ✅ Removed the stray 'and'
     return Response(xml_content, mimetype='application/xml')
