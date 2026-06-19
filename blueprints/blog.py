@@ -163,8 +163,8 @@ def add_comment(post_id):
             )
 
             # Send emails in background
-            send_admin_new_comment_background(reply, post)
-            send_author_new_comment_background(reply, post)
+            send_admin_new_comment_background(reply.id, post.id)   
+            send_author_new_comment_background(reply.id, post.id)  
 
             return jsonify({'message': 'Reply added successfully. Awaiting approval.'}), 201
 
@@ -195,8 +195,8 @@ def add_comment(post_id):
             )
 
             # Send emails in background
-            send_admin_new_comment_background(comment, post)
-            send_author_new_comment_background(comment, post)
+            send_admin_new_comment_background(comment.id, post.id)   
+            send_author_new_comment_background(comment.id, post.id)  
 
             return jsonify({'message': 'Comment added successfully. Awaiting approval.'}), 201
 
