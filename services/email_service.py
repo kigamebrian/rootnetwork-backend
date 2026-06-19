@@ -561,11 +561,13 @@ def send_admin_new_post_background(post, admin_email=None):
 def send_post_author_post_created_background(post):
     send_email_background(notify_post_author_post_created, post)
 
-def send_admin_new_comment_background(comment, post, admin_email=None):
-    send_email_background(notify_admin_new_comment, comment, post, admin_email)
+def send_admin_new_comment_background(comment_id, post_id, admin_email=None):
+    from services.email_service import notify_admin_new_comment_by_id
+    send_email_background(notify_admin_new_comment_by_id, comment_id, post_id, admin_email)
 
-def send_author_new_comment_background(comment, post):
-    send_email_background(notify_author_new_comment, comment, post)
+def send_author_new_comment_background(comment_id, post_id):
+    from services.email_service import notify_author_new_comment_by_id
+    send_email_background(notify_author_new_comment_by_id, comment_id, post_id)
 
 def send_welcome_email_background(email, name, username, password):
     send_email_background(send_welcome_email, email, name, username, password)
