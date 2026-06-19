@@ -80,9 +80,9 @@ def _generate_sitemap_xml(base_url):
 
 @sitemap_bp.route('/sitemap.xml')
 def sitemap():
-    base_url = request.host_url.rstrip('/')
+    #base_url = request.host_url.rstrip('/')
     # If you prefer the frontend domain, uncomment:
-    # base_url = "https://rootnetwork1.netlify.app"
+    base_url = "https://rootnetwork1.netlify.app"
     
     redis_client = _get_redis_client()
     cache_key = 'sitemap:xml'
