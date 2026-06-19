@@ -5,8 +5,7 @@ from exts import db
 
 def send_email_background(email_func, *args, **kwargs):
     """
-    Send an email in a background thread with the Flask application context.
-    Uses a fresh SQLAlchemy session to avoid conflicts with the main request.
+    Send an email in a background thread with a fresh SQLAlchemy session.
     """
     app = current_app._get_current_object()
 
@@ -18,18 +17,16 @@ def send_email_background(email_func, *args, **kwargs):
                 print(f"❌ Background email failed: {e}")
                 db.session.rollback()
             finally:
-                # Remove the session for this thread
+                # Clean up the thread-local session
                 db.session.remove()
 
     thread = threading.Thread(target=_send)
     thread.daemon = True
     thread.start()
 
-
 def run_in_background(func, *args, **kwargs):
     """
-    Run any function in a background thread with app context.
-    Uses a fresh SQLAlchemy session.
+    Run any function in a background thread with a fresh SQLAlchemy session.
     """
     app = current_app._get_current_object()
 
