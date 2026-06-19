@@ -552,6 +552,25 @@ def send_unsubscribe_confirmation(email):
     """
     send_email(email, subject, html_content)
 
+def notify_admin_new_comment_by_id(comment_id, post_id, admin_email=None):
+    """Fetch comment and post by ID, then send email to admin."""
+    from models import Comment, Post
+    comment = Comment.query.get(comment_id)
+    post = Post.query.get(post_id)
+    if not comment or not post:
+        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
+        return
+    return notify_admin_new_comment(comment, post, admin_email)
+
+def notify_author_new_comment_by_id(comment_id, post_id):
+    """Fetch comment and post by ID, then send email to post author."""
+    from models import Comment, Post
+    comment = Comment.query.get(comment_id)
+    post = Post.query.get(post_id)
+    if not comment or not post:
+        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
+        return
+    return notify_author_new_comment(comment, post)
 
 # ========== BACKGROUND WRAPPERS ==========
 
