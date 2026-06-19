@@ -1,6 +1,6 @@
 # blueprints/sitemap.py
 from flask import Blueprint, Response, request, current_app
-from models import Post, Category, generate_slug  # ✅ generate_slug imported
+from models import Post, Category, generate_slug   # ✅ generate_slug imported
 from datetime import datetime
 import time
 import logging
@@ -37,7 +37,6 @@ def _generate_sitemap_xml(base_url):
     # Add category pages – generate slug from name using generate_slug
     categories = Category.query.all()
     for cat in categories:
-        # ✅ CORRECTED: use generate_slug(cat.name) instead of cat.slug
         slug = generate_slug(cat.name)
         static_pages.append({
             'loc': f'/category/{slug}',
@@ -113,4 +112,5 @@ def sitemap():
     _memory_cache['content'] = xml_content
     _memory_cache['timestamp'] = now
     
+    # ✅ Removed the stray 'and'
     return Response(xml_content, mimetype='application/xml')
