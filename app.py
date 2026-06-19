@@ -19,6 +19,7 @@ import cloudinary
 from blueprints.subscription import subscription_bp
 from blueprints.admin_subscribers import admin_subscribers_bp
 from blueprints.settings_bp import settings_bp
+from blueprints.sitemap import sitemap_bp
 
 load_dotenv()
 
@@ -104,6 +105,7 @@ app.register_blueprint(ai_bp)
 app.register_blueprint(trending_bp)
 app.register_blueprint(rate_limit_bp)
 app.register_blueprint(tts_bp)
+app.register_blueprint(sitemap_bp)
 
 # ---- NEW SUBSCRIBER BLUEPRINTS ----
 app.register_blueprint(subscription_bp)
@@ -114,6 +116,14 @@ app.register_blueprint(settings_bp)
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
+
+@app.route('/robots.txt')
+def robots():
+    base_url = request.host_url.rstrip('/')
+    return f"""User-agent: *
+Allow: /
+Sitemap: {base_url}/sitemap.xml
+""", 200, {'Content-Type': 'text/plain'}
 
 @app.route('/audio_cache/<path:filename>')
 def serve_audio_cache(filename):
