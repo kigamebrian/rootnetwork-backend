@@ -1,5 +1,5 @@
 # blueprints/blog.py
-from flask import jsonify, request
+from flask import jsonify, request, make_response
 from models import Post, Category, Comment, CommentReply
 from exts import db, csrf
 from funcs import sanitize_html, limiter
@@ -7,10 +7,10 @@ from . import blog_bp
 from datetime import datetime
 from utils.seo import seo_helper  
 from services import send_admin_new_comment_background, send_author_new_comment_background
-from services.logging_service import logger   # <-- ADDED for security logging
+from services.logging_service import logger
 
-# ---------- GET posts (public) ----------
-@blog_bp.route('/posts', methods=['GET'])
+# ---------- GET posts (public listing) ----------
+@blog_bp.route('/posts', methods=['GET'], endpoint='blog_posts')
 @csrf.exempt
 def get_posts():
     page = request.args.get('page', 1, type=int)
@@ -28,11 +28,19 @@ def get_posts():
             'title': post.title,
             'content': post.content[:300] + '...' if len(post.content) > 300 else post.content,
             'image': post.image,
+            'images': post.images or [],          # <-- ADDED: multiple images
             'timestamp': post.timestamp.isoformat(),
-            'category': {'id': post.category.id, 'name': post.category.name} if post.category else None,
+            'category': {
+                'id': post.category.id,
+                'name': post.category.name
+            } if post.category else None,
             'comment_count': post.comments.count(),
-            'author': {'id': post.author.id, 'username': post.author.username,
-                       'full_name': post.author.full_name, 'profile_image': post.author.profile_image} if post.author else None
+            'author': {
+                'id': post.author.id,
+                'username': post.author.username,
+                'full_name': post.author.full_name,
+                'profile_image': post.author.profile_image
+            } if post.author else None
         })
     return jsonify({'posts': posts, 'total': pagination.total, 'page': page, 'pages': pagination.pages})
 
@@ -45,7 +53,7 @@ def get_post(identifier):
         post = Post.query.get(int(identifier))
     if not post:
         return jsonify({'error': 'Post not found'}), 404
-    
+
     comments = []
     for comment in post.comments:
         if comment.reviewed:
@@ -70,17 +78,18 @@ def get_post(identifier):
                 'reviewed': comment.reviewed,
                 'replies': replies
             })
-    
+
     meta_description = seo_helper.generate_meta_description(post.content)
     reading_time = seo_helper.calculate_read_time(post.content)
     keywords = seo_helper.generate_keywords(post.title, post.category.name if post.category else None)
-    
+
     return jsonify({
         'id': post.id,
         'slug': post.slug,
         'title': post.title,
         'content': post.content,
         'image': post.image,
+        'images': post.images or [],
         'timestamp': post.timestamp.isoformat(),
         'category': {
             'id': post.category.id,
@@ -113,9 +122,13 @@ def get_categories():
 @blog_bp.route('/posts/<int:post_id>/comments', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 def add_comment(post_id):
-    # Handle preflight OPTIONS
     if request.method == 'OPTIONS':
-        return '', 200
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', 'https://rootnetwork1.netlify.app')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
 
     post = Post.query.get_or_404(post_id)
     data = request.json
@@ -132,7 +145,6 @@ def add_comment(post_id):
 
     try:
         if parent_id:
-            # --- REPLY ---
             parent_comment = Comment.query.get(parent_id)
             if not parent_comment:
                 return jsonify({'error': 'Parent comment not found'}), 404
@@ -150,8 +162,6 @@ def add_comment(post_id):
             db.session.add(reply)
             db.session.commit()
 
-            # --- LOG to ActivityLog ---
-            # For replies, we log as 'comment_add' or we can use 'reply_add'
             logger.log_activity(
                 user_id=None,
                 username=author,
@@ -162,14 +172,12 @@ def add_comment(post_id):
                 status=201
             )
 
-            # Send emails in background
-            send_admin_new_comment_background(reply.id, post.id)   
-            send_author_new_comment_background(reply.id, post.id)  
+            send_admin_new_comment_background(reply, post)
+            send_author_new_comment_background(reply, post)
 
             return jsonify({'message': 'Reply added successfully. Awaiting approval.'}), 201
 
         else:
-            # --- NEW COMMENT ---
             comment = Comment(
                 author=author,
                 email=email,
@@ -183,7 +191,6 @@ def add_comment(post_id):
             db.session.add(comment)
             db.session.commit()
 
-            # --- LOG to ActivityLog ---
             logger.log_activity(
                 user_id=None,
                 username=author,
@@ -194,9 +201,8 @@ def add_comment(post_id):
                 status=201
             )
 
-            # Send emails in background
-            send_admin_new_comment_background(comment.id, post.id)   
-            send_author_new_comment_background(comment.id, post.id)  
+            send_admin_new_comment_background(comment, post)
+            send_author_new_comment_background(comment, post)
 
             return jsonify({'message': 'Comment added successfully. Awaiting approval.'}), 201
 
@@ -213,7 +219,6 @@ def get_related_posts(post_id):
         post = Post.query.get_or_404(post_id)
         related = []
 
-        # Same category
         if post.category_id:
             same_category = Post.query.filter(
                 Post.category_id == post.category_id,
@@ -221,7 +226,6 @@ def get_related_posts(post_id):
             ).order_by(Post.timestamp.desc()).limit(4).all()
             related.extend(same_category)
 
-        # Fill remaining with recent posts
         if len(related) < 4:
             remaining = 4 - len(related)
             recent_posts = Post.query.filter(
@@ -236,6 +240,7 @@ def get_related_posts(post_id):
             'title': p.title,
             'content': p.content[:150] + '...' if len(p.content) > 150 else p.content,
             'image': p.image,
+            'images': p.images or [],          # <-- ADDED
             'timestamp': p.timestamp.isoformat(),
             'category': p.category.name if p.category else 'Uncategorized',
             'author': p.author.username if p.author else 'Unknown'
