@@ -8,37 +8,28 @@ from . import upload_bp
 from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
-from services.logging_service import logger   # optional for security logs
 
-# ========== UPLOAD FOLDERS ==========
+# Upload folders
 UPLOAD_FOLDERS = {
     'posts': os.path.join('static', 'posts'),
     'profiles': os.path.join('static', 'profiles')
 }
 
 def ensure_upload_folders():
+    """Create upload folders if they don't exist."""
     for folder in UPLOAD_FOLDERS.values():
         os.makedirs(folder, exist_ok=True)
 
-# ========== CORS HELPER ==========
-def get_allowed_origin():
-    origin = request.headers.get('Origin', '')
-    allowed_origins = [
-        'https://rootnetwork1.netlify.app',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000'
-    ]
-    return origin if origin in allowed_origins else 'https://rootnetwork1.netlify.app'
-
-# ---------- SINGLE POST IMAGE ----------
+# ========== SINGLE IMAGE UPLOAD (post) ==========
 @upload_bp.route('/upload-post-image', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 @login_required
 @security_middleware
 def upload_post_image():
+    # Handle preflight
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Origin', 'https://rootnetwork1.netlify.app')
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -61,22 +52,17 @@ def upload_post_image():
     filepath = os.path.join(UPLOAD_FOLDERS['posts'], filename)
     file.save(filepath)
 
-    is_valid, msg, w, h = validate_and_sanitize_image(filepath)
-    if not is_valid:
+    valid, msg, w, h = validate_and_sanitize_image(filepath)
+    if not valid:
         os.remove(filepath)
         return jsonify({'error': msg}), 400
-
-    # Optional: log upload
-    user = User.query.get(session.get('user_id'))
-    if user:
-        logger.log_image_upload(user, 'post', filename)
 
     return jsonify({
         'image_url': f"/static/posts/{filename}",
         'message': 'Image uploaded successfully'
     }), 200
 
-# ---------- SINGLE PROFILE IMAGE ----------
+# ========== SINGLE IMAGE UPLOAD (profile) ==========
 @upload_bp.route('/upload-profile-image', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 @login_required
@@ -84,7 +70,7 @@ def upload_post_image():
 def upload_profile_image():
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Origin', 'https://rootnetwork1.netlify.app')
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -107,36 +93,36 @@ def upload_profile_image():
     filepath = os.path.join(UPLOAD_FOLDERS['profiles'], filename)
     file.save(filepath)
 
-    is_valid, msg, w, h = validate_and_sanitize_image(filepath)
-    if not is_valid:
+    valid, msg, w, h = validate_and_sanitize_image(filepath)
+    if not valid:
         os.remove(filepath)
         return jsonify({'error': msg}), 400
 
     user = User.query.get(session['user_id'])
     if user:
+        # Remove old profile image if not default
         if user.profile_image and user.profile_image != 'default-avatar.png':
-            old = os.path.join(UPLOAD_FOLDERS['profiles'], os.path.basename(user.profile_image))
-            if os.path.exists(old):
-                os.remove(old)
+            old_path = os.path.join(UPLOAD_FOLDERS['profiles'], os.path.basename(user.profile_image))
+            if os.path.exists(old_path):
+                os.remove(old_path)
         user.profile_image = f"profiles/{filename}"
         db.session.commit()
-        # Optional: log
-        logger.log_image_upload(user, 'profile', filename)
 
     return jsonify({
         'image_url': f"/static/profiles/{filename}",
         'message': 'Profile image uploaded successfully'
     }), 200
 
-# ---------- MULTIPLE POST IMAGES ----------
+# ========== MULTIPLE IMAGES UPLOAD (post) ==========
 @upload_bp.route('/upload-post-images', methods=['POST', 'OPTIONS'])
 @csrf.exempt
 @login_required
 @security_middleware
 def upload_post_images():
+    # Handle preflight
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', get_allowed_origin())
+        response.headers.add('Access-Control-Allow-Origin', 'https://rootnetwork1.netlify.app')
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
@@ -148,7 +134,7 @@ def upload_post_images():
         return jsonify({'error': 'No images provided'}), 400
 
     files = request.files.getlist('images')
-    if not files:
+    if not files or len(files) == 0:
         return jsonify({'error': 'No images selected'}), 400
 
     if len(files) > 10:
@@ -160,8 +146,9 @@ def upload_post_images():
     for file in files:
         if file.filename == '':
             continue
+
         if not allowed_file(file.filename):
-            # Cleanup all saved files
+            # Clean up already saved files
             for path in saved_paths:
                 if os.path.exists(path):
                     os.remove(path)
@@ -173,8 +160,9 @@ def upload_post_images():
         file.save(filepath)
         saved_paths.append(filepath)
 
-        is_valid, msg, w, h = validate_and_sanitize_image(filepath)
-        if not is_valid:
+        # Validate and sanitize
+        valid, msg, w, h = validate_and_sanitize_image(filepath)
+        if not valid:
             for path in saved_paths:
                 if os.path.exists(path):
                     os.remove(path)
@@ -184,21 +172,8 @@ def upload_post_images():
         uploaded.append({
             'url': url,
             'caption': '',
-            'alt': ''
+            'alt': '',
         })
-
-    # Optional: log (could log count instead of each file)
-    user = User.query.get(session.get('user_id'))
-    if user:
-        logger.log_activity(
-            user_id=user.id,
-            username=user.username,
-            action='upload_images',
-            action_details=f'Uploaded {len(uploaded)} images',
-            endpoint='/api/upload-post-images',
-            method='POST',
-            status=200
-        )
 
     return jsonify({
         'images': uploaded,
