@@ -118,6 +118,7 @@ class Post(db.Model):
     slug = db.Column(db.String(120), unique=True, nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
     image = db.Column(db.String(500))
+    images = db.Column(db.JSON, default=list)
     # Allow timestamp to be NULL for drafts
     timestamp = db.Column(db.DateTime(timezone=True), nullable=True, index=True)  # Changed to nullable=True
     author_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
