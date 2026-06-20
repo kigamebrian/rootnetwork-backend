@@ -1,352 +1,267 @@
-# blueprints/admin_posts.py
-from flask import jsonify, request, session
-from models import Post, generate_slug, User
+# blueprints/blog.py
+from flask import jsonify, request, make_response
+from models import Post, Category, Comment, CommentReply
 from exts import db, csrf
-from funcs import login_required, sanitize_html, get_session_id
-from middleware.security_middleware import security_middleware
-from . import admin_posts_bp
-from datetime import datetime, timezone
-from services import send_admin_new_post_background, send_post_author_post_created_background
-from services.logging_service import logger   # <-- SECURITY LOGGING
+from funcs import sanitize_html, limiter
+from . import blog_bp
+from datetime import datetime
+from utils.seo import seo_helper  
+from services import send_admin_new_comment_background, send_author_new_comment_background
+from services.logging_service import logger   # security logging
 
-# ---------- ANALYTICS TRACKING (optional) ----------
-def track_action(action_type, action_details, target_id, target_type):
-    try:
-        from models import UserAction
-        session_id = get_session_id()
-        user_id = session.get('user_id')
-        action = UserAction(
-            user_id=user_id,
-            session_id=session_id,
-            action_type=action_type[:50],
-            action_details=action_details[:500],
-            target_id=target_id,
-            target_type=target_type[:50],
-            timestamp=datetime.now(timezone.utc)
-        )
-        db.session.add(action)
-        db.session.commit()
-    except Exception as e:
-        print(f"Failed to track action: {e}")
-
-def parse_scheduled_datetime(dt_str):
-    if not dt_str:
-        return None
-    try:
-        if dt_str.endswith('Z'):
-            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-        else:
-            dt = datetime.fromisoformat(dt_str)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        else:
-            dt = dt.astimezone(timezone.utc)
-        return dt
-    except Exception as e:
-        print(f"Error parsing datetime: {e}")
-        return None
-
-# ---------- GET all posts (admin) ----------
-@admin_posts_bp.route('/posts', methods=['GET'])
+# ---------- GET posts (public listing) ----------
+@blog_bp.route('/posts', methods=['GET'])
 @csrf.exempt
-def get_admin_posts():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
+def get_posts():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    category_id = request.args.get('category_id', type=int)
+    query = Post.query.filter_by(status='published').order_by(Post.timestamp.desc())
+    if category_id:
+        query = query.filter_by(category_id=category_id)
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    posts = []
+    for post in pagination.items:
+        posts.append({
+            'id': post.id,
+            'slug': post.slug,
+            'title': post.title,
+            'content': post.content[:300] + '...' if len(post.content) > 300 else post.content,
+            'image': post.image,                     # featured image
+            'images': post.images or [],             # <-- ADDED: multiple images
+            'timestamp': post.timestamp.isoformat(),
+            'category': {'id': post.category.id, 'name': post.category.name} if post.category else None,
+            'comment_count': post.comments.count(),
+            'author': {
+                'id': post.author.id,
+                'username': post.author.username,
+                'full_name': post.author.full_name,
+                'profile_image': post.author.profile_image
+            } if post.author else None
+        })
+    return jsonify({'posts': posts, 'total': pagination.total, 'page': page, 'pages': pagination.pages})
+
+# ---------- GET single post ----------
+@blog_bp.route('/posts/<string:identifier>', methods=['GET'])
+@csrf.exempt
+def get_post(identifier):
+    post = Post.query.filter_by(slug=identifier).first()
+    if not post and identifier.isdigit():
+        post = Post.query.get(int(identifier))
+    if not post:
+        return jsonify({'error': 'Post not found'}), 404
+
+    comments = []
+    for comment in post.comments:
+        if comment.reviewed:
+            replies = []
+            for reply in comment.comment_replies:
+                if reply.reviewed:
+                    replies.append({
+                        'id': reply.id,
+                        'author': reply.author,
+                        'content': reply.comment_reply,
+                        'timestamp': reply.timestamp.isoformat(),
+                        'from_admin': reply.from_admin
+                    })
+            comments.append({
+                'id': comment.id,
+                'author': comment.author,
+                'email': comment.email,
+                'site': comment.site,
+                'content': comment.comment,
+                'timestamp': comment.timestamp.isoformat(),
+                'from_admin': comment.from_admin,
+                'reviewed': comment.reviewed,
+                'replies': replies
+            })
+
+    meta_description = seo_helper.generate_meta_description(post.content)
+    reading_time = seo_helper.calculate_read_time(post.content)
+    keywords = seo_helper.generate_keywords(post.title, post.category.name if post.category else None)
+
+    return jsonify({
+        'id': post.id,
+        'slug': post.slug,
+        'title': post.title,
+        'content': post.content,
+        'image': post.image,
+        'images': post.images or [],           # <-- ADDED
+        'timestamp': post.timestamp.isoformat(),
+        'category': {
+            'id': post.category.id,
+            'name': post.category.name
+        } if post.category else None,
+        'author': {
+            'id': post.author.id,
+            'username': post.author.username,
+            'full_name': post.author.full_name,
+            'profile_image': post.author.profile_image
+        } if post.author else None,
+        'comments': comments,
+        'meta_description': meta_description,
+        'reading_time': reading_time,
+        'keywords': keywords
+    })
+
+# ---------- GET categories ----------
+@blog_bp.route('/categories', methods=['GET'])
+@csrf.exempt
+def get_categories():
+    categories = Category.query.order_by(Category.name.asc()).all()
+    return jsonify([{
+        'id': cat.id,
+        'name': cat.name,
+        'post_count': cat.posts.count()
+    } for cat in categories])
+
+# ---------- ADD COMMENT (and reply) ----------
+@blog_bp.route('/posts/<int:post_id>/comments', methods=['POST', 'OPTIONS'])
+@csrf.exempt
+def add_comment(post_id):
+    # Handle preflight OPTIONS
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', 'https://rootnetwork1.netlify.app')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRFToken')
+        return response, 200
+
+    post = Post.query.get_or_404(post_id)
+    data = request.json
+
+    author = data.get('author', 'Anonymous')[:50]
+    email = data.get('email', '')[:254]
+    site = data.get('site', '')[:255]
+    content = sanitize_html(data.get('content', ''))
+
+    if not content:
+        return jsonify({'error': 'Comment content is required'}), 400
+
+    parent_id = data.get('parent_id')
+
     try:
-        user = User.query.get(session['user_id'])
-        status_filter = request.args.get('status', 'all')
-        if user.is_super_admin:
-            query = Post.query.order_by(Post.id.desc())
+        if parent_id:
+            parent_comment = Comment.query.get(parent_id)
+            if not parent_comment:
+                return jsonify({'error': 'Parent comment not found'}), 404
+
+            reply = CommentReply(
+                author=author,
+                email=email,
+                site=site,
+                comment_reply=content,
+                comment_id=parent_id,
+                reviewed=False,
+                from_admin=False,
+                timestamp=datetime.now()
+            )
+            db.session.add(reply)
+            db.session.commit()
+
+            # --- Security logging for reply ---
+            logger.log_activity(
+                user_id=None,
+                username=author,
+                action='add_reply',
+                action_details=f'Added reply to comment {parent_id} on post: {post.title}',
+                endpoint=f'/api/posts/{post_id}/comments',
+                method='POST',
+                status=201
+            )
+
+            send_admin_new_comment_background(reply, post)
+            send_author_new_comment_background(reply, post)
+
+            return jsonify({'message': 'Reply added successfully. Awaiting approval.'}), 201
+
         else:
-            query = Post.query.filter_by(author_id=user.id).order_by(Post.id.desc())
-        if status_filter != 'all':
-            query = query.filter_by(status=status_filter)
-        posts = query.all()
+            comment = Comment(
+                author=author,
+                email=email,
+                site=site,
+                comment=content,
+                post_id=post_id,
+                reviewed=False,
+                from_admin=False,
+                timestamp=datetime.now()
+            )
+            db.session.add(comment)
+            db.session.commit()
+
+            # --- Security logging for comment ---
+            logger.log_activity(
+                user_id=None,
+                username=author,
+                action='add_comment',
+                action_details=f'Added comment on post: {post.title}',
+                endpoint=f'/api/posts/{post_id}/comments',
+                method='POST',
+                status=201
+            )
+
+            send_admin_new_comment_background(comment, post)
+            send_author_new_comment_background(comment, post)
+
+            return jsonify({'message': 'Comment added successfully. Awaiting approval.'}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error adding comment/reply: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ---------- RELATED POSTS ----------
+@blog_bp.route('/posts/<int:post_id>/related', methods=['GET'])
+@csrf.exempt
+def get_related_posts(post_id):
+    try:
+        post = Post.query.get_or_404(post_id)
+        related = []
+
+        if post.category_id:
+            same_category = Post.query.filter(
+                Post.category_id == post.category_id,
+                Post.id != post_id
+            ).order_by(Post.timestamp.desc()).limit(4).all()
+            related.extend(same_category)
+
+        if len(related) < 4:
+            remaining = 4 - len(related)
+            recent_posts = Post.query.filter(
+                Post.id != post_id,
+                Post.id.notin_([p.id for p in related]) if related else True
+            ).order_by(Post.timestamp.desc()).limit(remaining).all()
+            related.extend(recent_posts)
+
         return jsonify([{
             'id': p.id,
             'slug': p.slug,
             'title': p.title,
-            'content': p.content[:500] if len(p.content) > 500 else p.content,
-            'image': p.image,                     # featured image
-            'images': p.images or [],             # multiple images
-            'timestamp': p.timestamp.isoformat() if p.timestamp else None,
-            'status': p.status,
-            'scheduled_for': p.scheduled_for.isoformat() if p.scheduled_for else None,
+            'content': p.content[:150] + '...' if len(p.content) > 150 else p.content,
+            'image': p.image,
+            'images': p.images or [],          # <-- ADDED
+            'timestamp': p.timestamp.isoformat(),
             'category': p.category.name if p.category else 'Uncategorized',
-            'category_id': p.category.id if p.category else None,
-            'author_id': p.author_id,
-            'author_name': p.author.username if p.author else 'Unknown',
-            'comment_count': p.comments.count()
-        } for p in posts])
-    except Exception as e:
-        print(f"Error in get_admin_posts: {e}")
-        return jsonify({'error': str(e)}), 500
+            'author': p.author.username if p.author else 'Unknown'
+        } for p in related]), 200
 
-# ---------- CREATE post ----------
-@admin_posts_bp.route('/posts', methods=['POST'])
+    except Exception as e:
+        print(f"Error getting related posts: {e}")
+        return jsonify([]), 200
+
+# ---------- NAV CATEGORIES ----------
+@blog_bp.route('/nav-categories', methods=['GET'])
 @csrf.exempt
-@login_required
-@security_middleware
-def create_post():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
+def get_nav_categories():
     try:
-        data = request.json
-        sanitized_title = data.get('title', '')[:200]
-        sanitized_content = sanitize_html(data.get('content', ''))
-        if not sanitized_title or len(sanitized_title) < 3:
-            return jsonify({'error': 'Title must be at least 3 characters'}), 400
-
-        slug = generate_slug(sanitized_title)
-        original_slug = slug
-        counter = 1
-        while Post.query.filter_by(slug=slug).first():
-            slug = f"{original_slug}-{counter}"
-            counter += 1
-
-        status = data.get('status', 'draft')
-        scheduled_for = None
-        timestamp = None
-        published_at = None
-        now = datetime.now(timezone.utc)
-
-        if status == 'published':
-            timestamp = now
-            published_at = now
-        elif status == 'scheduled':
-            scheduled_for = parse_scheduled_datetime(data.get('scheduled_for'))
-            if scheduled_for and scheduled_for <= now:
-                status = 'published'
-                timestamp = now
-                published_at = now
-                scheduled_for = None
-
-        # --- Extract images array ---
-        images = data.get('images', [])
-        if not isinstance(images, list):
-            images = []
-
-        post = Post(
-            title=sanitized_title,
-            slug=slug,
-            content=sanitized_content,
-            image=data.get('image'),          # featured
-            images=images,                    # additional images
-            category_id=data.get('category_id') if data.get('category_id') else None,
-            author_id=session['user_id'],
-            timestamp=timestamp,
-            status=status,
-            scheduled_for=scheduled_for,
-            published_at=published_at
-        )
-        db.session.add(post)
-        db.session.commit()
-
-        # --- Notifications ---
-        if status == 'published':
-            send_admin_new_post_background(post)
-            send_post_author_post_created_background(post)
-
-        # --- SECURITY LOGGING ---
-        user = User.query.get(session['user_id'])
-        logger.log_post_creation(user, post.id, post.title)
-
-        # --- Analytics tracking ---
-        track_action(
-            action_type='create_post',
-            action_details=f'Created post: {sanitized_title} (Status: {status})',
-            target_id=post.id,
-            target_type='post'
-        )
-
-        status_message = {
-            'draft': 'saved as draft',
-            'published': 'published successfully',
-            'scheduled': f'scheduled for {scheduled_for}'
-        }.get(status, 'saved')
-
-        return jsonify({
-            'message': f'Post {status_message}',
-            'id': post.id,
-            'slug': post.slug,
-            'status': status
-        }), 201
+        categories = Category.query.order_by(Category.name.asc()).limit(5).all()
+        return jsonify([{
+            'id': cat.id,
+            'name': cat.name,
+            'slug': cat.name.lower().replace(' ', '-'),
+            'post_count': cat.posts.count()
+        } for cat in categories]), 200
     except Exception as e:
-        db.session.rollback()
-        print(f"Error in create_post: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-# ---------- GET post for edit ----------
-@admin_posts_bp.route('/posts/<string:slug>', methods=['GET'])
-@csrf.exempt
-def get_post_for_edit(slug):
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    try:
-        post = Post.query.filter_by(slug=slug).first()
-        if not post:
-            return jsonify({'error': 'Post not found'}), 404
-        user = User.query.get(session['user_id'])
-        if not user.is_super_admin and post.author_id != user.id:
-            return jsonify({'error': 'You can only edit your own posts'}), 403
-        return jsonify({
-            'id': post.id,
-            'slug': post.slug,
-            'title': post.title,
-            'content': post.content,
-            'image': post.image,
-            'images': post.images or [],
-            'category_id': post.category_id,
-            'author_id': post.author_id,
-            'status': post.status,
-            'scheduled_for': post.scheduled_for.isoformat() if post.scheduled_for else None,
-            'published_at': post.published_at.isoformat() if post.published_at else None
-        }), 200
-    except Exception as e:
-        print(f"Error in get_post_for_edit: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-# ---------- UPDATE post ----------
-@admin_posts_bp.route('/posts/<int:post_id>', methods=['PUT'])
-@csrf.exempt
-@login_required
-@security_middleware
-def update_post(post_id):
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    try:
-        post = Post.query.get_or_404(post_id)
-        user = User.query.get(session['user_id'])
-        if not user.is_super_admin and post.author_id != user.id:
-            return jsonify({'error': 'You can only edit your own posts'}), 403
-
-        data = request.json
-        old_title = post.title
-        changes_made = False
-        now = datetime.now(timezone.utc)
-
-        if data.get('title'):
-            sanitized_title = data['title'][:200]
-            if sanitized_title != post.title:
-                post.title = sanitized_title
-                new_slug = generate_slug(sanitized_title)
-                original_slug = new_slug
-                counter = 1
-                while Post.query.filter(Post.slug == new_slug, Post.id != post.id).first():
-                    new_slug = f"{original_slug}-{counter}"
-                    counter += 1
-                post.slug = new_slug
-                changes_made = True
-
-        if data.get('content'):
-            sanitized_content = data['content']
-            if post.content != sanitized_content:
-                post.content = sanitized_content
-                changes_made = True
-
-        if 'image' in data:
-            if post.image != data['image']:
-                post.image = data['image']
-                changes_made = True
-
-        # --- Update additional images ---
-        if 'images' in data:
-            new_images = data['images']
-            if isinstance(new_images, list):
-                if post.images != new_images:
-                    post.images = new_images
-                    changes_made = True
-            else:
-                print("⚠️ 'images' must be a list, ignoring")
-
-        if 'category_id' in data:
-            if post.category_id != data['category_id']:
-                post.category_id = data['category_id']
-                changes_made = True
-
-        if 'status' in data:
-            new_status = data['status']
-            if new_status != post.status:
-                old_status = post.status
-                post.status = new_status
-                changes_made = True
-                if new_status == 'scheduled':
-                    scheduled_for = parse_scheduled_datetime(data.get('scheduled_for'))
-                    post.scheduled_for = scheduled_for
-                    post.timestamp = None
-                    post.published_at = None
-                elif new_status == 'published':
-                    post.timestamp = now
-                    post.published_at = now
-                    post.scheduled_for = None
-                elif new_status == 'draft':
-                    post.timestamp = None
-                    post.published_at = None
-                    post.scheduled_for = None
-            elif new_status == 'scheduled' and data.get('scheduled_for'):
-                scheduled_for = parse_scheduled_datetime(data['scheduled_for'])
-                if post.scheduled_for != scheduled_for:
-                    post.scheduled_for = scheduled_for
-                    changes_made = True
-
-        if changes_made:
-            db.session.commit()
-            # --- SECURITY LOGGING ---
-            logger.log_post_update(user, post.id, post.title)
-        else:
-            print("No changes detected")
-
-        # --- Analytics tracking ---
-        track_action(
-            action_type='update_post',
-            action_details=f'Updated post: {old_title} -> {post.title}',
-            target_id=post_id,
-            target_type='post'
-        )
-
-        return jsonify({'message': 'Post updated successfully', 'slug': post.slug}), 200
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error in update_post: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-# ---------- DELETE post ----------
-@admin_posts_bp.route('/posts/<int:post_id>', methods=['DELETE'])
-@csrf.exempt
-@login_required
-@security_middleware
-def delete_post(post_id):
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    try:
-        post = Post.query.get_or_404(post_id)
-        user = User.query.get(session['user_id'])
-        if not user.is_super_admin and post.author_id != user.id:
-            return jsonify({'error': 'You can only delete your own posts'}), 403
-
-        post_title = post.title
-        db.session.delete(post)
-        db.session.commit()
-
-        # --- SECURITY LOGGING ---
-        logger.log_post_deletion(user, post_id, post_title)
-
-        # --- Analytics tracking ---
-        track_action(
-            action_type='delete_post',
-            action_details=f'Deleted post: {post_title}',
-            target_id=post_id,
-            target_type='post'
-        )
-
-        return jsonify({'message': 'Post deleted successfully'})
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error in delete_post: {e}")
-        return jsonify({'error': str(e)}), 500
+        print(f"Error getting nav categories: {e}")
+        return jsonify([]), 200
