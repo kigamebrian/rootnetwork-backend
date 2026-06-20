@@ -7,7 +7,7 @@ from middleware.security_middleware import security_middleware
 from . import admin_posts_bp
 from datetime import datetime, timezone
 from services import send_admin_new_post_background, send_post_author_post_created_background
-from services.logging_service import logger   # <-- ADDED for security logs
+from services.logging_service import logger   # <-- SECURITY LOGGING
 
 # ---------- ANALYTICS TRACKING (optional) ----------
 def track_action(action_type, action_details, target_id, target_type):
@@ -29,7 +29,6 @@ def track_action(action_type, action_details, target_id, target_type):
     except Exception as e:
         print(f"Failed to track action: {e}")
 
-# ---------- HELPER: parse scheduled datetime ----------
 def parse_scheduled_datetime(dt_str):
     if not dt_str:
         return None
@@ -47,7 +46,7 @@ def parse_scheduled_datetime(dt_str):
         print(f"Error parsing datetime: {e}")
         return None
 
-# ---------- GET admin posts ----------
+# ---------- GET all posts (admin) ----------
 @admin_posts_bp.route('/posts', methods=['GET'])
 @csrf.exempt
 def get_admin_posts():
@@ -68,8 +67,8 @@ def get_admin_posts():
             'slug': p.slug,
             'title': p.title,
             'content': p.content[:500] if len(p.content) > 500 else p.content,
-            'image': p.image,
-            'images': p.images or [],
+            'image': p.image,                     # featured image
+            'images': p.images or [],             # multiple images
             'timestamp': p.timestamp.isoformat() if p.timestamp else None,
             'status': p.status,
             'scheduled_for': p.scheduled_for.isoformat() if p.scheduled_for else None,
@@ -122,6 +121,7 @@ def create_post():
                 published_at = now
                 scheduled_for = None
 
+        # --- Extract images array ---
         images = data.get('images', [])
         if not isinstance(images, list):
             images = []
@@ -130,8 +130,8 @@ def create_post():
             title=sanitized_title,
             slug=slug,
             content=sanitized_content,
-            image=data.get('image'),
-            images=images,
+            image=data.get('image'),          # featured
+            images=images,                    # additional images
             category_id=data.get('category_id') if data.get('category_id') else None,
             author_id=session['user_id'],
             timestamp=timestamp,
@@ -142,7 +142,7 @@ def create_post():
         db.session.add(post)
         db.session.commit()
 
-        # --- Send notifications ---
+        # --- Notifications ---
         if status == 'published':
             send_admin_new_post_background(post)
             send_post_author_post_created_background(post)
@@ -151,7 +151,7 @@ def create_post():
         user = User.query.get(session['user_id'])
         logger.log_post_creation(user, post.id, post.title)
 
-        # --- ANALYTICS ---
+        # --- Analytics tracking ---
         track_action(
             action_type='create_post',
             action_details=f'Created post: {sanitized_title} (Status: {status})',
@@ -253,11 +253,15 @@ def update_post(post_id):
                 post.image = data['image']
                 changes_made = True
 
+        # --- Update additional images ---
         if 'images' in data:
             new_images = data['images']
-            if isinstance(new_images, list) and post.images != new_images:
-                post.images = new_images
-                changes_made = True
+            if isinstance(new_images, list):
+                if post.images != new_images:
+                    post.images = new_images
+                    changes_made = True
+            else:
+                print("⚠️ 'images' must be a list, ignoring")
 
         if 'category_id' in data:
             if post.category_id != data['category_id']:
@@ -296,7 +300,7 @@ def update_post(post_id):
         else:
             print("No changes detected")
 
-        # --- ANALYTICS ---
+        # --- Analytics tracking ---
         track_action(
             action_type='update_post',
             action_details=f'Updated post: {old_title} -> {post.title}',
@@ -333,7 +337,7 @@ def delete_post(post_id):
         # --- SECURITY LOGGING ---
         logger.log_post_deletion(user, post_id, post_title)
 
-        # --- ANALYTICS ---
+        # --- Analytics tracking ---
         track_action(
             action_type='delete_post',
             action_details=f'Deleted post: {post_title}',
