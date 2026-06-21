@@ -133,8 +133,9 @@ def create_post():
         db.session.add(post)
         db.session.commit()
         if status == 'published':
-            send_admin_new_post_background(post)
-            send_post_author_post_created_background(post)
+            # Pass only the post ID to background tasks (avoid session binding)
+            send_admin_new_post_background(post.id)
+            send_post_author_post_created_background(post.id)
         user = User.query.get(session['user_id'])
         logger.log_post_creation(user, post.id, post.title)
         track_action(
@@ -155,7 +156,7 @@ def create_post():
             'status': status
         }), 201
     except Exception as e:
-        # Use remove() to clean up the session without triggering 'concurrent operations' error
+        # Clean up the session without triggering 'concurrent operations' error
         db.session.remove()
         print(f"Error in create_post: {e}")
         import traceback
@@ -277,7 +278,6 @@ def update_post(post_id):
         )
         return jsonify({'message': 'Post updated successfully', 'slug': post.slug}), 200
     except Exception as e:
-        # Use remove() to clean up the session
         db.session.remove()
         print(f"Error in update_post: {e}")
         import traceback
@@ -308,7 +308,6 @@ def delete_post(post_id):
         )
         return jsonify({'message': 'Post deleted successfully'})
     except Exception as e:
-        # Use remove() to clean up the session
         db.session.remove()
         print(f"Error in delete_post: {e}")
         return jsonify({'error': str(e)}), 500
