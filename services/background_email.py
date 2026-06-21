@@ -1,4 +1,4 @@
-# backend/services/background_email.py
+# services/background_email.py
 import threading
 from flask import current_app
 from exts import db
@@ -15,9 +15,10 @@ def send_email_background(email_func, *args, **kwargs):
                 email_func(*args, **kwargs)
             except Exception as e:
                 print(f"❌ Background email failed: {e}")
-                db.session.rollback()
+                # Use remove() instead of rollback() to clean up the session
+                db.session.remove()
             finally:
-                # Clean up the thread-local session
+                # Ensure the session is removed
                 db.session.remove()
 
     thread = threading.Thread(target=_send)
@@ -36,7 +37,7 @@ def run_in_background(func, *args, **kwargs):
                 func(*args, **kwargs)
             except Exception as e:
                 print(f"❌ Background task failed: {e}")
-                db.session.rollback()
+                db.session.remove()
             finally:
                 db.session.remove()
 
