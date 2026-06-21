@@ -57,6 +57,12 @@ def refresh_session():
     if 'user_id' in session:
         session.modified = True
 
+# ========== SESSION TEARDOWN – Clean up after each request ==========
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    """Remove the session at the end of each request."""
+    db.session.remove()
+
 # ========== WAF ==========
 with app.app_context():
     waf_initialized = init_waf()
