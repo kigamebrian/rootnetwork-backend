@@ -1,4 +1,4 @@
-# backend/services/email_service.py
+# services/email_service.py
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -9,16 +9,16 @@ from services.background_email import send_email_background
 
 load_dotenv()
 
-# ========== CONFIGURATION (all from environment) ==========
+# ========== CONFIGURATION ==========
 SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 SMTP_USER = os.getenv('SMTP_USER', '')
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
 FROM_EMAIL = os.getenv('FROM_EMAIL', SMTP_USER)
 BLOG_NAME = os.getenv('BLOG_NAME', 'RootNetwork')
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')   # consistent
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
-# ========== GENERIC EMAIL SENDER (only one) ==========
+# ========== GENERIC EMAIL SENDER ==========
 def send_email(to_email, subject, html_content, text_content=None):
     """
     Send an email using SMTP (Gmail or any provider).
@@ -53,218 +53,110 @@ def send_email(to_email, subject, html_content, text_content=None):
         return False
 
 
-# ========== SPECIFIC EMAIL FUNCTIONS ==========
+# ========== POST NOTIFICATIONS (ID‑BASED) ==========
 
-def send_welcome_email(email, name, username, password):
-    """Send welcome email to newly created user with their credentials"""
-    subject = f"Welcome to {BLOG_NAME} - Your Writer Account"
+def notify_admin_new_post(post_id, admin_email=None):
+    """Send email to admin when a new post is published (fetches post by ID)."""
+    from models import Post, User
+    post = Post.query.get(post_id)
+    if not post:
+        print(f"❌ Post {post_id} not found, cannot send notification")
+        return False
 
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #4a5568; color: white; padding: 20px; text-align: center; }}
-            .content {{ padding: 20px; }}
-            .credentials-box {{ background: #f7fafc; border-left: 4px solid #48bb78; padding: 15px; margin: 20px 0; }}
-            .password {{ font-family: monospace; font-size: 18px; font-weight: bold; color: #2f855a; }}
-            .button {{ background: #48bb78; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; }}
-            .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #718096; }}
-            .warning {{ background: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 20px 0; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h2>Welcome to {BLOG_NAME}!</h2>
-            </div>
-            <div class="content">
-                <p>Hello {name or username},</p>
-                <p>You have been added as a writer to <strong>{BLOG_NAME}</strong>.</p>
-                
-                <div class="credentials-box">
-                    <p><strong>Your Account Details:</strong></p>
-                    <p>📧 <strong>Email:</strong> {email}<br>
-                    👤 <strong>Username:</strong> {username}</p>
-                    <p>🔑 <strong>Your Password:</strong><br>
-                    <span class="password">{password}</span></p>
-                </div>
-                
-                <div class="warning">
-                    <p><strong>⚠️ Important Security Notice:</strong></p>
-                    <ul>
-                        <li>Store this password in a secure place</li>
-                        <li>Do not share your password with anyone</li>
-                        <li>We recommend changing your password after first login</li>
-                    </ul>
-                </div>
-                
-                <p style="text-align: center;">
-                    <a href="{FRONTEND_URL}/login" class="button">Click Here to Login</a>
-                </p>
-                
-                <p>After logging in, you can:</p>
-                <ul>
-                    <li>Create and publish posts</li>
-                    <li>Edit your profile</li>
-                    <li>Change your password in Profile Settings</li>
-                </ul>
-                
-                <p>If you didn't expect this email or have any questions, please contact the site administrator.</p>
-            </div>
-            <div class="footer">
-                <p>This is an automated message. Please do not reply to this email.</p>
-                <p>&copy; 2024 {BLOG_NAME}. All rights reserved.</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-
-    text_content = f"""
-    Welcome to {BLOG_NAME}!
-    
-    Hello {name or username},
-    
-    You have been added as a writer to {BLOG_NAME}.
-    
-    Your Account Details:
-    Email: {email}
-    Username: {username}
-    Password: {password}
-    
-    Login here: {FRONTEND_URL}/login
-    
-    Important Security Notice:
-    - Store this password in a secure place
-    - Do not share your password with anyone
-    - We recommend changing your password after first login
-    
-    After logging in, you can:
-    - Create and publish posts
-    - Edit your profile
-    - Change your password in Profile Settings
-    
-    If you didn't expect this email, please contact the site administrator.
-    """
-
-    return send_email(email, subject, html_content, text_content)
-
-
-def email_to_admin(comment, post, admin_email=None):
-    """Send email to admin when new comment is posted"""
     admin_email = admin_email or os.getenv('ADMIN_EMAIL', SMTP_USER)
     if not admin_email:
-        print("⚠️ Admin email not configured")
         return False
 
-    subject = f"New Comment on '{post.title}' - {BLOG_NAME}"
+    subject = f"📝 New Post Published: {post.title} - {BLOG_NAME}"
 
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
             .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #4a5568; color: white; padding: 10px; text-align: center; }}
+            .header {{ background: #27ae60; color: white; padding: 15px; text-align: center; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h3>New Comment Alert</h3>
+                <h2>📝 New Post Published</h2>
             </div>
-            <p><strong>Post:</strong> {post.title}</p>
-            <p><strong>From:</strong> {comment.author} ({comment.email})</p>
-            <p><strong>Comment:</strong><br>{comment.comment}</p>
-            <p><a href="{FRONTEND_URL}/admin/comments">Click here to moderate this comment</a></p>
+            <p><strong>Title:</strong> {post.title}</p>
+            <p><strong>Author:</strong> {post.author.username if post.author else 'Unknown'}</p>
+            <p><strong>Category:</strong> {post.category.name if post.category else 'Uncategorized'}</p>
+            <p><a href="{FRONTEND_URL}/admin/posts">📋 View in Admin</a></p>
+            <p><a href="{FRONTEND_URL}/blog/post/{post.slug}">🔗 View on Site</a></p>
         </div>
     </body>
     </html>
     """
 
-    return send_email(admin_email, subject, html_content)
+    # Get all super admins
+    super_admins = User.query.filter_by(is_super_admin=True).all()
+    emails = list({admin_email} | {u.email for u in super_admins if u.email})
+
+    for email in emails:
+        send_email(email, subject, html_content)
+    return True
 
 
-def email_to_author(comment, post):
-    """Send email to post author when new comment is posted"""
-    author_email = post.author.email if post.author else None
-    if not author_email:
+def notify_post_author_post_created(post_id):
+    """Send email to post author confirming their post was published."""
+    from models import Post
+    post = Post.query.get(post_id)
+    if not post or not post.author or not post.author.email:
         return False
 
-    subject = f"New Comment on Your Post '{post.title}' - {BLOG_NAME}"
+    subject = f"✅ Your Post '{post.title}' has been Published - {BLOG_NAME}"
 
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
             .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #4a5568; color: white; padding: 10px; text-align: center; }}
+            .header {{ background: #27ae60; color: white; padding: 15px; text-align: center; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h3>New Comment on Your Post</h3>
+                <h2>✅ Post Published Successfully</h2>
             </div>
-            <p><strong>Post:</strong> {post.title}</p>
-            <p><strong>From:</strong> {comment.author}</p>
-            <p><strong>Comment:</strong><br>{comment.comment}</p>
-            <p><a href="{FRONTEND_URL}/blog/post/{post.slug}">Click here to view the comment</a></p>
+            <p>Hello {post.author.full_name or post.author.username},</p>
+            <p>Your post <strong>"{post.title}"</strong> has been successfully published.</p>
+            <p><strong>Category:</strong> {post.category.name if post.category else 'Uncategorized'}</p>
+            <p><a href="{FRONTEND_URL}/blog/post/{post.slug}">🔗 View Your Post</a></p>
+            <p><a href="{FRONTEND_URL}/admin/create">✍️ Write Another Post</a></p>
         </div>
     </body>
     </html>
     """
 
-    return send_email(author_email, subject, html_content)
+    return send_email(post.author.email, subject, html_content)
 
 
-def email_to_author_comment_approved(comment, post):
-    """Send email to comment author when their comment is approved"""
-    if not comment.email:
+# ========== COMMENT NOTIFICATIONS (ID‑BASED) ==========
+
+def notify_admin_new_comment(comment_id, post_id, admin_email=None):
+    """Send email to all super admins when a new comment is posted."""
+    from models import Comment, Post, User
+    comment = Comment.query.get(comment_id)
+    post = Post.query.get(post_id)
+    if not comment or not post:
+        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
         return False
 
-    subject = f"Your Comment on '{post.title}' has been Approved - {BLOG_NAME}"
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #4a5568; color: white; padding: 10px; text-align: center; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h3>Your Comment Has Been Approved</h3>
-            </div>
-            <p>Your comment on <strong>"{post.title}"</strong> has been approved and is now visible to others.</p>
-            <p><strong>Your comment:</strong><br>{comment.comment}</p>
-            <p><a href="{FRONTEND_URL}/blog/post/{post.slug}">Click here to view your comment</a></p>
-        </div>
-    </body>
-    </html>
-    """
-
-    return send_email(comment.email, subject, html_content)
-
-
-def notify_admin_new_comment(comment, post, admin_email=None):
-    """Send email to all super admins when new comment is posted"""
-    from models import User
     admin_email = admin_email or os.getenv('ADMIN_EMAIL', SMTP_USER)
+    if not admin_email:
+        return False
 
     super_admins = User.query.filter_by(is_super_admin=True).all()
-    emails = [admin_email] + [u.email for u in super_admins if u.email]
-    emails = list(set(emails))
+    emails = list({admin_email} | {u.email for u in super_admins if u.email})
 
     subject = f"🔔 New Comment on '{post.title}' - {BLOG_NAME}"
 
@@ -302,8 +194,15 @@ def notify_admin_new_comment(comment, post, admin_email=None):
     return True
 
 
-def notify_author_new_comment(comment, post):
-    """Send email to post author when someone comments on their post (if not admin)"""
+def notify_author_new_comment(comment_id, post_id):
+    """Send email to post author when someone comments on their post (if not admin)."""
+    from models import Comment, Post
+    comment = Comment.query.get(comment_id)
+    post = Post.query.get(post_id)
+    if not comment or not post:
+        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
+        return False
+
     if not post.author or not post.author.email:
         return False
 
@@ -344,155 +243,72 @@ def notify_author_new_comment(comment, post):
     return send_email(post.author.email, subject, html_content)
 
 
-def notify_admin_new_post(post, admin_email=None):
-    """Send email to admin when a new post is published"""
-    admin_email = admin_email or os.getenv('ADMIN_EMAIL', SMTP_USER)
+# ========== OTHER EMAIL FUNCTIONS ==========
 
-    subject = f"📝 New Post Published: {post.title} - {BLOG_NAME}"
-
+def send_welcome_email(email, name, username, password):
+    """Send welcome email to newly created user."""
+    subject = f"Welcome to {BLOG_NAME} - Your Writer Account"
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
             .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #27ae60; color: white; padding: 15px; text-align: center; }}
+            .header {{ background: #4a5568; color: white; padding: 20px; text-align: center; }}
+            .content {{ padding: 20px; }}
+            .credentials-box {{ background: #f7fafc; border-left: 4px solid #48bb78; padding: 15px; margin: 20px 0; }}
+            .password {{ font-family: monospace; font-size: 18px; font-weight: bold; color: #2f855a; }}
+            .button {{ background: #48bb78; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; }}
+            .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #718096; }}
+            .warning {{ background: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 20px 0; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <div class="header">
-                <h2>📝 New Post Published</h2>
+            <div class="header"><h2>Welcome to {BLOG_NAME}!</h2></div>
+            <div class="content">
+                <p>Hello {name or username},</p>
+                <p>You have been added as a writer to <strong>{BLOG_NAME}</strong>.</p>
+                <div class="credentials-box">
+                    <p><strong>Your Account Details:</strong></p>
+                    <p>📧 <strong>Email:</strong> {email}<br>
+                    👤 <strong>Username:</strong> {username}</p>
+                    <p>🔑 <strong>Your Password:</strong><br>
+                    <span class="password">{password}</span></p>
+                </div>
+                <div class="warning">
+                    <p><strong>⚠️ Important Security Notice:</strong></p>
+                    <ul>
+                        <li>Store this password in a secure place</li>
+                        <li>Do not share your password with anyone</li>
+                        <li>We recommend changing your password after first login</li>
+                    </ul>
+                </div>
+                <p style="text-align: center;">
+                    <a href="{FRONTEND_URL}/login" class="button">Click Here to Login</a>
+                </p>
+                <p>After logging in, you can:</p>
+                <ul>
+                    <li>Create and publish posts</li>
+                    <li>Edit your profile</li>
+                    <li>Change your password in Profile Settings</li>
+                </ul>
+                <p>If you didn't expect this email, please contact the site administrator.</p>
             </div>
-            <p><strong>Title:</strong> {post.title}</p>
-            <p><strong>Author:</strong> {post.author.username if post.author else 'Unknown'}</p>
-            <p><strong>Category:</strong> {post.category.name if post.category else 'Uncategorized'}</p>
-            <p><a href="{FRONTEND_URL}/admin/posts">📋 View in Admin</a></p>
-            <p><a href="{FRONTEND_URL}/blog/post/{post.slug}">🔗 View on Site</a></p>
+            <div class="footer">
+                <p>This is an automated message. Please do not reply to this email.</p>
+                <p>&copy; 2024 {BLOG_NAME}. All rights reserved.</p>
+            </div>
         </div>
     </body>
     </html>
     """
+    text_content = f"Welcome to {BLOG_NAME}!\n\nHello {name or username},\n\nYou have been added as a writer.\n\nAccount Details:\nEmail: {email}\nUsername: {username}\nPassword: {password}\n\nLogin here: {FRONTEND_URL}/login"
+    return send_email(email, subject, html_content, text_content)
 
-    return send_email(admin_email, subject, html_content)
-
-
-def notify_post_author_post_created(post):
-    """Send email to post author confirming their post was published"""
-    if not post.author or not post.author.email:
-        return False
-
-    subject = f"✅ Your Post '{post.title}' has been Published - {BLOG_NAME}"
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #27ae60; color: white; padding: 15px; text-align: center; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h2>✅ Post Published Successfully</h2>
-            </div>
-            <p>Hello {post.author.full_name or post.author.username},</p>
-            <p>Your post <strong>"{post.title}"</strong> has been successfully published.</p>
-            <p><strong>Category:</strong> {post.category.name if post.category else 'Uncategorized'}</p>
-            <p><a href="{FRONTEND_URL}/blog/post/{post.slug}">🔗 View Your Post</a></p>
-            <p><a href="{FRONTEND_URL}/admin/create">✍️ Write Another Post</a></p>
-        </div>
-    </body>
-    </html>
-    """
-
-    return send_email(post.author.email, subject, html_content)
-
-
-def notify_admin_intrusion_detected(threat, ip_address, endpoint):
-    """Send email to admin when intrusion is detected"""
-    admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
-    if not admin_email:
-        return False
-
-    subject = f"🚨 SECURITY ALERT: Intrusion Detected - {BLOG_NAME}"
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #e74c3c; color: white; padding: 15px; text-align: center; }}
-            .alert {{ background: #ffeeee; border-left: 4px solid #e74c3c; padding: 15px; margin: 15px 0; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h2>🚨 SECURITY ALERT</h2>
-            </div>
-            <div class="alert">
-                <p><strong>Threat Type:</strong> {threat.get('type', 'Unknown')}</p>
-                <p><strong>Severity:</strong> {threat.get('severity', 'Unknown')}</p>
-                <p><strong>Pattern:</strong> {threat.get('pattern', 'Unknown')}</p>
-                <p><strong>IP Address:</strong> {ip_address}</p>
-                <p><strong>Endpoint:</strong> {endpoint}</p>
-                <p><strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            </div>
-            <p><a href="{FRONTEND_URL}/admin/security">🔒 View Security Dashboard</a></p>
-        </div>
-    </body>
-    </html>
-    """
-
-    return send_email(admin_email, subject, html_content)
-
-
-def notify_admin_failed_login(ip_address, attempts_count, username_attempted):
-    """Send email to admin when multiple failed login attempts detected"""
-    admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
-    if not admin_email:
-        return False
-
-    subject = f"⚠️ Multiple Failed Login Attempts - {BLOG_NAME}"
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #f39c12; color: white; padding: 15px; text-align: center; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h2>⚠️ Multiple Failed Login Attempts</h2>
-            </div>
-            <p><strong>IP Address:</strong> {ip_address}</p>
-            <p><strong>Attempts:</strong> {attempts_count}</p>
-            <p><strong>Username Attempted:</strong> {username_attempted}</p>
-            <p><a href="{FRONTEND_URL}/admin/security">🔒 View Security Dashboard</a></p>
-        </div>
-    </body>
-    </html>
-    """
-
-    return send_email(admin_email, subject, html_content)
-
-
-# ========== SUBSCRIBER EMAILS ==========
 
 def send_verification_email(email, token):
-    """Send verification email with subscription confirmation link."""
     verify_url = f"{FRONTEND_URL}/subscribe/verify/{token}"
     subject = "Confirm your subscription"
     html_content = f"""
@@ -505,7 +321,6 @@ def send_verification_email(email, token):
 
 
 def send_post_notification_email(subscriber, post):
-    """Send instant notification for a new post."""
     post_url = f"{FRONTEND_URL}/blog/post/{post.slug}"
     subject = f"New article: {post.title}"
     html_content = f"""
@@ -522,7 +337,6 @@ def send_post_notification_email(subscriber, post):
 
 
 def send_digest_email(subscriber, posts, frequency='daily'):
-    """Send digest email with multiple posts."""
     subject = f"Your {frequency} digest from RootNetwork"
     post_list = ''.join([
         f'<li><a href="{FRONTEND_URL}/blog/post/{p.slug}">{p.title}</a> - {p.category.name if p.category else "Uncategorized"}</li>'
@@ -544,7 +358,6 @@ def send_digest_email(subscriber, posts, frequency='daily'):
 
 
 def send_unsubscribe_confirmation(email):
-    """Send confirmation email after unsubscribe."""
     subject = "You've been unsubscribed"
     html_content = f"""
     <p>You have successfully unsubscribed from RootNetwork notifications.</p>
@@ -552,41 +365,84 @@ def send_unsubscribe_confirmation(email):
     """
     send_email(email, subject, html_content)
 
-def notify_admin_new_comment_by_id(comment_id, post_id, admin_email=None):
-    """Fetch comment and post by ID, then send email to admin."""
-    from models import Comment, Post
-    comment = Comment.query.get(comment_id)
-    post = Post.query.get(post_id)
-    if not comment or not post:
-        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
-        return
-    return notify_admin_new_comment(comment, post, admin_email)
 
-def notify_author_new_comment_by_id(comment_id, post_id):
-    """Fetch comment and post by ID, then send email to post author."""
-    from models import Comment, Post
-    comment = Comment.query.get(comment_id)
-    post = Post.query.get(post_id)
-    if not comment or not post:
-        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
-        return
-    return notify_author_new_comment(comment, post)
+def notify_admin_intrusion_detected(threat, ip_address, endpoint):
+    admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
+    if not admin_email:
+        return False
+    subject = f"🚨 SECURITY ALERT: Intrusion Detected - {BLOG_NAME}"
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: #e74c3c; color: white; padding: 15px; text-align: center; }}
+            .alert {{ background: #ffeeee; border-left: 4px solid #e74c3c; padding: 15px; margin: 15px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header"><h2>🚨 SECURITY ALERT</h2></div>
+            <div class="alert">
+                <p><strong>Threat Type:</strong> {threat.get('type', 'Unknown')}</p>
+                <p><strong>Severity:</strong> {threat.get('severity', 'Unknown')}</p>
+                <p><strong>Pattern:</strong> {threat.get('pattern', 'Unknown')}</p>
+                <p><strong>IP Address:</strong> {ip_address}</p>
+                <p><strong>Endpoint:</strong> {endpoint}</p>
+                <p><strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            </div>
+            <p><a href="{FRONTEND_URL}/admin/security">🔒 View Security Dashboard</a></p>
+        </div>
+    </body>
+    </html>
+    """
+    return send_email(admin_email, subject, html_content)
 
-# ========== BACKGROUND WRAPPERS ==========
 
-def send_admin_new_post_background(post, admin_email=None):
-    send_email_background(notify_admin_new_post, post, admin_email)
+def notify_admin_failed_login(ip_address, attempts_count, username_attempted):
+    admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
+    if not admin_email:
+        return False
+    subject = f"⚠️ Multiple Failed Login Attempts - {BLOG_NAME}"
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: #f39c12; color: white; padding: 15px; text-align: center; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header"><h2>⚠️ Multiple Failed Login Attempts</h2></div>
+            <p><strong>IP Address:</strong> {ip_address}</p>
+            <p><strong>Attempts:</strong> {attempts_count}</p>
+            <p><strong>Username Attempted:</strong> {username_attempted}</p>
+            <p><a href="{FRONTEND_URL}/admin/security">🔒 View Security Dashboard</a></p>
+        </div>
+    </body>
+    </html>
+    """
+    return send_email(admin_email, subject, html_content)
 
-def send_post_author_post_created_background(post):
-    send_email_background(notify_post_author_post_created, post)
+
+# ========== BACKGROUND WRAPPERS (pass only IDs) ==========
+
+def send_admin_new_post_background(post_id, admin_email=None):
+    send_email_background(notify_admin_new_post, post_id, admin_email)
+
+def send_post_author_post_created_background(post_id):
+    send_email_background(notify_post_author_post_created, post_id)
 
 def send_admin_new_comment_background(comment_id, post_id, admin_email=None):
-    from services.email_service import notify_admin_new_comment_by_id
-    send_email_background(notify_admin_new_comment_by_id, comment_id, post_id, admin_email)
+    send_email_background(notify_admin_new_comment, comment_id, post_id, admin_email)
 
 def send_author_new_comment_background(comment_id, post_id):
-    from services.email_service import notify_author_new_comment_by_id
-    send_email_background(notify_author_new_comment_by_id, comment_id, post_id)
+    send_email_background(notify_author_new_comment, comment_id, post_id)
 
 def send_welcome_email_background(email, name, username, password):
     send_email_background(send_welcome_email, email, name, username, password)
