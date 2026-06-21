@@ -155,7 +155,8 @@ def create_post():
             'status': status
         }), 201
     except Exception as e:
-        db.session.rollback()
+        # Use remove() to clean up the session without triggering 'concurrent operations' error
+        db.session.remove()
         print(f"Error in create_post: {e}")
         import traceback
         traceback.print_exc()
@@ -276,7 +277,8 @@ def update_post(post_id):
         )
         return jsonify({'message': 'Post updated successfully', 'slug': post.slug}), 200
     except Exception as e:
-        db.session.rollback()
+        # Use remove() to clean up the session
+        db.session.remove()
         print(f"Error in update_post: {e}")
         import traceback
         traceback.print_exc()
@@ -306,6 +308,7 @@ def delete_post(post_id):
         )
         return jsonify({'message': 'Post deleted successfully'})
     except Exception as e:
-        db.session.rollback()
+        # Use remove() to clean up the session
+        db.session.remove()
         print(f"Error in delete_post: {e}")
         return jsonify({'error': str(e)}), 500
