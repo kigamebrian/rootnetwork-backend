@@ -28,7 +28,7 @@ def get_posts():
             'title': post.title,
             'content': post.content[:300] + '...' if len(post.content) > 300 else post.content,
             'image': post.image,
-            'images': post.images or [],          # <-- ADDED: multiple images
+            'images': post.images or [],
             'timestamp': post.timestamp.isoformat(),
             'category': {
                 'id': post.category.id,
@@ -107,7 +107,7 @@ def get_post(identifier):
         'keywords': keywords
     })
 
-# ---------- GET categories ----------
+# ---------- GET categories (FIXED: added slug) ----------
 @blog_bp.route('/categories', methods=['GET'])
 @csrf.exempt
 def get_categories():
@@ -115,6 +115,7 @@ def get_categories():
     return jsonify([{
         'id': cat.id,
         'name': cat.name,
+        'slug': cat.name.lower().replace(' ', '-'),  # <-- FIXED: added slug
         'post_count': cat.posts.count()
     } for cat in categories])
 
@@ -240,7 +241,7 @@ def get_related_posts(post_id):
             'title': p.title,
             'content': p.content[:150] + '...' if len(p.content) > 150 else p.content,
             'image': p.image,
-            'images': p.images or [],          # <-- ADDED
+            'images': p.images or [],
             'timestamp': p.timestamp.isoformat(),
             'category': p.category.name if p.category else 'Uncategorized',
             'author': p.author.username if p.author else 'Unknown'
