@@ -85,3 +85,4 @@ WTForms==3.2.2
 yarl==1.24.2
 psycopg2-binary==2.9.9
 cloudinary==1.40.0
+brevo-python==1.0.0
