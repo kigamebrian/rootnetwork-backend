@@ -1,69 +1,78 @@
-# services/email_service.py
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+# services/email_service.py - BREVO API VERSION (No SMTP, No Background Threads)
 import os
-from dotenv import load_dotenv
 from datetime import datetime
-from services.background_email import send_email_background
+from dotenv import load_dotenv
+from brevo_python import Configuration, ApiClient, TransactionalEmailsApi
+from brevo_python.models import SendSmtpEmail, SendSmtpEmailTo, SendSmtpEmailSender
+from brevo_python.rest import ApiException
 
 load_dotenv()
 
 # ========== CONFIGURATION ==========
-SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
-SMTP_USER = os.getenv('SMTP_USER', '')
-SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
-FROM_EMAIL = os.getenv('FROM_EMAIL', SMTP_USER)
+BREVO_API_KEY = os.getenv('BREVO_API_KEY')
+BREVO_SENDER_EMAIL = os.getenv('BREVO_SENDER_EMAIL', 'hello@rootnetwork.com')
 BLOG_NAME = os.getenv('BLOG_NAME', 'RootNetwork')
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://rootnetwork1.netlify.app')
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
 
-# ========== GENERIC EMAIL SENDER ==========
-def send_email(to_email, subject, html_content, text_content=None):
+# ========== BREVO CLIENT ==========
+def get_brevo_client():
+    """Get Brevo API client"""
+    configuration = Configuration()
+    configuration.api_key['api-key'] = BREVO_API_KEY
+    return ApiClient(configuration)
+
+def send_email(to_email, subject, html_content, text_content=None, from_name=BLOG_NAME):
     """
-    Send an email using SMTP (Gmail or any provider).
+    Send an email using Brevo API.
     Returns True on success, False on failure.
     """
+    if not BREVO_API_KEY:
+        print("⚠️ BREVO_API_KEY not configured. Email not sent.")
+        print(f"Would have sent to: {to_email} | Subject: {subject}")
+        return False
+
     try:
-        if not SMTP_USER or not SMTP_PASSWORD:
-            print("⚠️ Email not configured. SMTP credentials missing.")
-            print(f"Would have sent email to: {to_email}")
-            print(f"Subject: {subject}")
-            return False
-
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = FROM_EMAIL
-        msg['To'] = to_email
-
-        if text_content:
-            msg.attach(MIMEText(text_content, 'plain'))
-        msg.attach(MIMEText(html_content, 'html'))
-
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:    
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-
-        print(f"✅ Email sent to {to_email}")
-        return True
-
+        with get_brevo_client() as api_client:
+            api_instance = TransactionalEmailsApi(api_client)
+            
+            sender = SendSmtpEmailSender(
+                name=from_name,
+                email=BREVO_SENDER_EMAIL
+            )
+            to = [SendSmtpEmailTo(email=to_email)]
+            
+            email = SendSmtpEmail(
+                sender=sender,
+                to=to,
+                subject=subject,
+                html_content=html_content,
+                text_content=text_content
+            )
+            
+            result = api_instance.send_transac_email(email)
+            print(f"✅ Email sent to {to_email}: {result.message_id}")
+            return True
+            
+    except ApiException as e:
+        print(f"❌ Brevo API error: {e}")
+        return False
     except Exception as e:
-        print(f"❌ Failed to send email to {to_email}: {e}")
+        print(f"❌ Unexpected error: {e}")
         return False
 
 
-# ========== POST NOTIFICATIONS (ID‑BASED) ==========
+# ========== POST NOTIFICATIONS ==========
 
 def notify_admin_new_post(post_id, admin_email=None):
-    """Send email to admin when a new post is published (fetches post by ID)."""
+    """Send email to admin when a new post is published."""
     from models import Post, User
     post = Post.query.get(post_id)
     if not post:
-        print(f"❌ Post {post_id} not found, cannot send notification")
+        print(f"❌ Post {post_id} not found")
         return False
 
-    admin_email = admin_email or os.getenv('ADMIN_EMAIL', SMTP_USER)
+    admin_email = admin_email or ADMIN_EMAIL
     if not admin_email:
         return False
 
@@ -81,9 +90,7 @@ def notify_admin_new_post(post_id, admin_email=None):
     </head>
     <body>
         <div class="container">
-            <div class="header">
-                <h2>📝 New Post Published</h2>
-            </div>
+            <div class="header"><h2>📝 New Post Published</h2></div>
             <p><strong>Title:</strong> {post.title}</p>
             <p><strong>Author:</strong> {post.author.username if post.author else 'Unknown'}</p>
             <p><strong>Category:</strong> {post.category.name if post.category else 'Uncategorized'}</p>
@@ -124,9 +131,7 @@ def notify_post_author_post_created(post_id):
     </head>
     <body>
         <div class="container">
-            <div class="header">
-                <h2>✅ Post Published Successfully</h2>
-            </div>
+            <div class="header"><h2>✅ Post Published Successfully</h2></div>
             <p>Hello {post.author.full_name or post.author.username},</p>
             <p>Your post <strong>"{post.title}"</strong> has been successfully published.</p>
             <p><strong>Category:</strong> {post.category.name if post.category else 'Uncategorized'}</p>
@@ -140,7 +145,7 @@ def notify_post_author_post_created(post_id):
     return send_email(post.author.email, subject, html_content)
 
 
-# ========== COMMENT NOTIFICATIONS (ID‑BASED) ==========
+# ========== COMMENT NOTIFICATIONS ==========
 
 def notify_admin_new_comment(comment_id, post_id, admin_email=None):
     """Send email to all super admins when a new comment is posted."""
@@ -148,10 +153,10 @@ def notify_admin_new_comment(comment_id, post_id, admin_email=None):
     comment = Comment.query.get(comment_id)
     post = Post.query.get(post_id)
     if not comment or not post:
-        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
+        print(f"❌ Comment or post not found")
         return False
 
-    admin_email = admin_email or os.getenv('ADMIN_EMAIL', SMTP_USER)
+    admin_email = admin_email or ADMIN_EMAIL
     if not admin_email:
         return False
 
@@ -173,9 +178,7 @@ def notify_admin_new_comment(comment_id, post_id, admin_email=None):
     </head>
     <body>
         <div class="container">
-            <div class="header">
-                <h2>🔔 New Comment Alert</h2>
-            </div>
+            <div class="header"><h2>🔔 New Comment Alert</h2></div>
             <p><strong>📝 Post:</strong> {post.title}</p>
             <p><strong>👤 From:</strong> {comment.author} ({comment.email})</p>
             <div class="comment-box">
@@ -195,12 +198,11 @@ def notify_admin_new_comment(comment_id, post_id, admin_email=None):
 
 
 def notify_author_new_comment(comment_id, post_id):
-    """Send email to post author when someone comments on their post (if not admin)."""
+    """Send email to post author when someone comments on their post."""
     from models import Comment, Post
     comment = Comment.query.get(comment_id)
     post = Post.query.get(post_id)
     if not comment or not post:
-        print(f"❌ Comment or post not found for IDs: {comment_id}, {post_id}")
         return False
 
     if not post.author or not post.author.email:
@@ -224,9 +226,7 @@ def notify_author_new_comment(comment_id, post_id):
     </head>
     <body>
         <div class="container">
-            <div class="header">
-                <h2>💬 New Comment on Your Post</h2>
-            </div>
+            <div class="header"><h2>💬 New Comment on Your Post</h2></div>
             <p><strong>📝 Post:</strong> {post.title}</p>
             <p><strong>👤 From:</strong> {comment.author}</p>
             <div class="comment-box">
@@ -243,7 +243,7 @@ def notify_author_new_comment(comment_id, post_id):
     return send_email(post.author.email, subject, html_content)
 
 
-# ========== OTHER EMAIL FUNCTIONS ==========
+# ========== USER & SUBSCRIPTION EMAILS ==========
 
 def send_welcome_email(email, name, username, password):
     """Send welcome email to newly created user."""
@@ -317,7 +317,7 @@ def send_verification_email(email, token):
     <p><a href="{verify_url}">Confirm Subscription</a></p>
     <p>If you didn't request this, please ignore this email.</p>
     """
-    send_email(email, subject, html_content)
+    return send_email(email, subject, html_content)
 
 
 def send_post_notification_email(subscriber, post):
@@ -333,7 +333,7 @@ def send_post_notification_email(subscriber, post):
     <a href="{FRONTEND_URL}/subscribe/preferences?email={subscriber.email}">Manage preferences</a> | 
     <a href="{FRONTEND_URL}/subscribe/unsubscribe?email={subscriber.email}">Unsubscribe</a></p>
     """
-    send_email(subscriber.email, subject, html_content)
+    return send_email(subscriber.email, subject, html_content)
 
 
 def send_digest_email(subscriber, posts, frequency='daily'):
@@ -354,7 +354,7 @@ def send_digest_email(subscriber, posts, frequency='daily'):
         <a href="{FRONTEND_URL}/subscribe/unsubscribe?email={subscriber.email}">Unsubscribe</a>
     </p>
     """
-    send_email(subscriber.email, subject, html_content)
+    return send_email(subscriber.email, subject, html_content)
 
 
 def send_unsubscribe_confirmation(email):
@@ -363,11 +363,13 @@ def send_unsubscribe_confirmation(email):
     <p>You have successfully unsubscribed from RootNetwork notifications.</p>
     <p>If this was a mistake, you can <a href="{FRONTEND_URL}/subscribe">subscribe again</a>.</p>
     """
-    send_email(email, subject, html_content)
+    return send_email(email, subject, html_content)
 
+
+# ========== SECURITY EMAILS ==========
 
 def notify_admin_intrusion_detected(threat, ip_address, endpoint):
-    admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
+    admin_email = ADMIN_EMAIL
     if not admin_email:
         return False
     subject = f"🚨 SECURITY ALERT: Intrusion Detected - {BLOG_NAME}"
@@ -402,7 +404,7 @@ def notify_admin_intrusion_detected(threat, ip_address, endpoint):
 
 
 def notify_admin_failed_login(ip_address, attempts_count, username_attempted):
-    admin_email = os.getenv('ADMIN_EMAIL', SMTP_USER)
+    admin_email = ADMIN_EMAIL
     if not admin_email:
         return False
     subject = f"⚠️ Multiple Failed Login Attempts - {BLOG_NAME}"
@@ -430,25 +432,27 @@ def notify_admin_failed_login(ip_address, attempts_count, username_attempted):
     return send_email(admin_email, subject, html_content)
 
 
-# ========== BACKGROUND WRAPPERS (pass only IDs) ==========
+# ========== WRAPPER FUNCTIONS (NO BACKGROUND THREADS) ==========
+# These now call the functions directly (no background threads needed)
+# Brevo API is fast enough to be called synchronously
 
 def send_admin_new_post_background(post_id, admin_email=None):
-    send_email_background(notify_admin_new_post, post_id, admin_email)
+    return notify_admin_new_post(post_id, admin_email)
 
 def send_post_author_post_created_background(post_id):
-    send_email_background(notify_post_author_post_created, post_id)
+    return notify_post_author_post_created(post_id)
 
 def send_admin_new_comment_background(comment_id, post_id, admin_email=None):
-    send_email_background(notify_admin_new_comment, comment_id, post_id, admin_email)
+    return notify_admin_new_comment(comment_id, post_id, admin_email)
 
 def send_author_new_comment_background(comment_id, post_id):
-    send_email_background(notify_author_new_comment, comment_id, post_id)
+    return notify_author_new_comment(comment_id, post_id)
 
 def send_welcome_email_background(email, name, username, password):
-    send_email_background(send_welcome_email, email, name, username, password)
+    return send_welcome_email(email, name, username, password)
 
 def send_admin_intrusion_detected_background(threat, ip_address, endpoint):
-    send_email_background(notify_admin_intrusion_detected, threat, ip_address, endpoint)
+    return notify_admin_intrusion_detected(threat, ip_address, endpoint)
 
 def send_admin_failed_login_background(ip_address, attempts_count, username_attempted):
-    send_email_background(notify_admin_failed_login, ip_address, attempts_count, username_attempted)
+    return notify_admin_failed_login(ip_address, attempts_count, username_attempted)
